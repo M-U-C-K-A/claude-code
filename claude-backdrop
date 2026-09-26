@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# claude-backdrop — une image de fond derrière Claude Desktop (macOS).
-# Lanceur : retrouve le dossier du dépôt (même via un lien symbolique) et passe
-# la main à Node.
+# claude-backdrop — un tableau derrière Claude Desktop (macOS).
+# Lanceur : retrouve le dossier du dépôt (même via un lien symbolique), compile
+# l'outil (Go) au premier lancement ou quand les sources ont changé, puis lui
+# passe la main. Sans Go, l'ancienne version (Node) sert de secours.
 set -euo pipefail
 
 source="${BASH_SOURCE[0]}"
@@ -11,10 +12,29 @@ while [ -L "$source" ]; do
   [ "${source#/}" = "$source" ] && source="$dir/$source"
 done
 dir="$(cd -P "$(dirname "$source")" >/dev/null 2>&1 && pwd)"
+bin="$dir/bin/claude-backdrop"
 
-if ! command -v node >/dev/null 2>&1; then
-  echo "✗ Node.js (18 ou plus) est requis : brew install node   —   ou https://nodejs.org" >&2
-  exit 1
+# Le binaire est périmé s'il manque, ou s'il est plus ancien qu'un fichier Go,
+# que go.mod/go.sum, ou qu'un des fichiers qu'il embarque (src/*.js, *.css, *.plist).
+stale() {
+  [ -x "$bin" ] || return 0
+  [ -n "$(find "$dir/go.mod" "$dir/go.sum" "$dir/cmd" "$dir/internal" "$dir/src" -newer "$bin" \
+    \( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' -o -name '*.js' -o -name '*.css' -o -name '*.plist' \) \
+    -print -quit 2>/dev/null)" ]
+}
+
+if stale; then
+  if command -v go >/dev/null 2>&1; then
+    echo "› Compilation de claude-backdrop…" >&2
+    (cd "$dir" && go build -o "$bin" ./cmd/claude-backdrop)
+  elif [ ! -x "$bin" ]; then
+    if command -v node >/dev/null 2>&1; then
+      echo "! Go n'est pas installé : ancienne version (Node), sans l'interface. Pour la nouvelle : brew install go" >&2
+      exec node "$dir/src/cli.mjs" "$@"
+    fi
+    echo "✗ Go est requis pour compiler claude-backdrop : brew install go   —   ou https://go.dev/dl" >&2
+    exit 1
+  fi
 fi
 
-exec node "$dir/src/cli.mjs" "$@"
+exec "$bin" "$@"
