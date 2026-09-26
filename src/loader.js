@@ -251,7 +251,7 @@
           rotate,
           fixed,
           gallery: gal,
-          settings: { dim: num(cfg, "dim"), brightness: num(cfg, "brightness"), imageOpacity: num(cfg, "imageOpacity") },
+          settings: { imageBlur: num(cfg, "imageBlur"), brightness: num(cfg, "brightness") },
         };
         css = `${readText(file("theme.css"))}\n${stableTokens(cfg)}\n${readText(file("custom.css"))}`;
       }

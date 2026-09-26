@@ -100,8 +100,8 @@ Un petit bouton 🖼 apparaît **en haut à droite** de Claude. Il ouvre un pann
 où tu peux, sans passer par le terminal :
 
 - voir les fonds disponibles (avec leur nom) et **changer celui de la fenêtre** d'un clic ;
-- **ajouter ta propre image** (bouton ＋, réduite puis ajoutée à la galerie) ;
-- régler l'**assombrissement** (le voile) et la **luminosité** de l'image avec deux curseurs ;
+- **ajouter ta propre image** (tuile ＋, réduite puis ajoutée à la galerie) ;
+- régler le **flou** et la **luminosité** de l'image avec deux curseurs ;
 - activer/couper l'**image au hasard par conversation** ;
 - **Définir par défaut** l'image affichée (pour toutes les fenêtres).
 

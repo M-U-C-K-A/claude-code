@@ -406,10 +406,9 @@ function renderGrid() {
     }
     gridEl.appendChild(cell);
   }
-  // add tile
+  // add tile — just the ＋, no label
   const add = el("label", { className: "cb-thumb cb-add", title: "Ajouter une image" });
-  add.appendChild(svg(["M12 5v14M5 12h14"], 22));
-  add.appendChild(el("span", { className: "cb-caption", textContent: "Ajouter" }));
+  add.appendChild(svg(["M12 5v14M5 12h14"], 24));
   const input = el("input", { type: "file", accept: "image/*" });
   input.style.display = "none";
   input.onchange = async () => {
@@ -461,14 +460,15 @@ function downscale(file, max = 1920, quality = 0.85) {
 }
 
 // A labelled slider that live-updates a CSS var and persists via the loader.
-function slider(label, key, cssVar, min, max, step, value, format) {
+// `unit` is the CSS unit written into the var (e.g. "px"); `format` is display.
+function slider(label, key, cssVar, min, max, step, value, format, unit = "") {
   const row = el("label", { className: "cb-slider" });
   const top = el("div", { className: "cb-slider-top" });
   const out = el("span", { className: "cb-slider-val", textContent: format(value) });
   top.append(el("span", { textContent: label }), out);
   const input = el("input", { type: "range", min, max, step, value });
   input.oninput = () => {
-    root.style.setProperty(cssVar, input.value);
+    root.style.setProperty(cssVar, input.value + unit);
     out.textContent = format(Number(input.value));
   };
   input.onchange = () => sendCmd({ action: "set", key, value: Number(input.value) });
@@ -476,6 +476,7 @@ function slider(label, key, cssVar, min, max, step, value, format) {
   return row;
 }
 const pct = (v) => `${Math.round(v * 100)}%`;
+const px = (v) => `${Math.round(v)} px`;
 
 function buildUI() {
   if (document.getElementById(UI_ID) || !document.body) return;
@@ -496,7 +497,7 @@ function buildUI() {
   const settings = (CB.settings && typeof CB.settings === "object") ? CB.settings : {};
   const sliders = el("div", { className: "cb-sliders" });
   sliders.append(
-    slider("Assombrissement", "dim", "--cb-dim", 0, 0.9, 0.05, settings.dim ?? 0.55, pct),
+    slider("Flou", "imageBlur", "--cb-image-blur", 0, 40, 1, settings.imageBlur ?? 6, px, "px"),
     slider("Luminosité", "brightness", "--cb-brightness", 0.4, 1.6, 0.05, settings.brightness ?? 1, pct),
   );
 
