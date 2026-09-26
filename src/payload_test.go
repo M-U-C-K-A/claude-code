@@ -51,6 +51,32 @@ func TestThemeTokenRemapsAreImportant(t *testing.T) {
 	}
 }
 
+// The gallery panel lives in the same user-origin sheet: claude.ai's Tailwind
+// preflight resets padding, margins, radius and button backgrounds on every
+// element, so each of the panel's declarations must be !important too.
+func TestGalleryPanelRulesAreImportant(t *testing.T) {
+	const marker = "4. gallery UI */"
+	i := strings.Index(ThemeCSS, marker)
+	if i < 0 {
+		t.Fatal("gallery UI section not found in theme.css")
+	}
+	count := 0
+	for _, block := range regexp.MustCompile(`\{([^{}]*)\}`).FindAllStringSubmatch(ThemeCSS[i:], -1) {
+		for _, decl := range strings.Split(block[1], ";") {
+			if decl = strings.TrimSpace(decl); decl == "" {
+				continue
+			}
+			count++
+			if !strings.HasSuffix(decl, "!important") {
+				t.Errorf("gallery panel: %q is missing !important", decl)
+			}
+		}
+	}
+	if count < 100 {
+		t.Fatalf("expected the panel rules, found only %d declarations", count)
+	}
+}
+
 func TestThemeIsWellFormed(t *testing.T) {
 	if strings.Count(ThemeCSS, "{") != strings.Count(ThemeCSS, "}") {
 		t.Fatal("unbalanced braces in theme.css")

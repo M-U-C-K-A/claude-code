@@ -39,11 +39,10 @@ type Status struct {
 	Signature  *macos.Signature // nil unless asked for (slow)
 	Backups    []Backup
 
-	Dir        string
-	Config     Config
-	Paintings  []string // gallery ids on disk
-	FixedImage string   // path, "" if missing
-	Report     *Report  // what the loader last saw inside Claude
+	Dir     string
+	Config  Config
+	Picture string  // what is behind the conversations, in a few words
+	Report  *Report // what the loader last saw inside Claude
 }
 
 // Report is status.json, written by the loader from inside Claude.
@@ -110,12 +109,8 @@ func (b *Backdrop) ReadReport() *Report {
 // Status reads the state of Claude.app (the signature only when asked: it
 // takes a few seconds) and of the support folder.
 func (b *Backdrop) Status(withSignature bool) Status {
-	st := Status{App: b.App, Dir: b.Dir, Config: b.ReadConfig(), FixedImage: b.FixedImagePath(), Report: b.ReadReport()}
-	for _, p := range Gallery {
-		if b.HasPainting(p.ID) {
-			st.Paintings = append(st.Paintings, p.ID)
-		}
-	}
+	cfg := b.ReadConfig()
+	st := Status{App: b.App, Dir: b.Dir, Config: cfg, Picture: b.PictureSummary(cfg), Report: b.ReadReport()}
 	if runtime.GOOS != "darwin" || b.requireApp() != nil {
 		return st
 	}

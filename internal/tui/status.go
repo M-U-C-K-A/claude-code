@@ -101,7 +101,7 @@ func StatusReport(st *backdrop.Status) string {
 		enabled = sWarn.Render("désactivé")
 	}
 	add(row("état", enabled))
-	add(row("image", PictureSummary(st.Config, st.Paintings)))
+	add(row("image", st.Picture))
 	add(row("réglages", SettingsSummary(st.Config)))
 
 	report := st.Report

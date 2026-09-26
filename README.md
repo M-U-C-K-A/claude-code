@@ -46,11 +46,11 @@ Pour avoir la commande partout :
 `claude-backdrop` sans argument ouvre une interface dans le terminal
 (flèches, entrée, échap) :
 
-- **Tableau** — un tableau au hasard par conversation, ou un seul fixe : un de
-  la galerie (avec un aperçu dans le terminal), ou ton image, fichier ou URL
-  (glisse le fichier dans le terminal).
-- **Réglages** — voile, flou du tableau, verre, flou du verre, cadrage…, avec
-  les flèches ←/→. Claude applique chaque changement en direct.
+- **Image** — une image au hasard par conversation, ou une seule fixe : un
+  tableau de la galerie (avec un aperçu dans le terminal), une de tes images,
+  ou une nouvelle, fichier ou URL (glisse le fichier dans le terminal).
+- **Réglages** — voile, luminosité, flou, verre, transparence du terminal,
+  cadrage…, avec les flèches ←/→. Claude applique chaque changement en direct.
 - **Thème** — le couper ou le remettre, sans rien désinstaller.
 - **Diagnostic** — l'état de Claude.app et ce que le thème voit dans Claude :
   image affichée ou non, calques restés opaques.
@@ -63,9 +63,9 @@ Pour les scripts, ou si tu préfères :
 ```bash
 claude-backdrop install             # installe (ou met à jour) le thème dans Claude
 claude-backdrop uninstall           # remet Claude d'origine (--purge : efface aussi réglages et images)
-claude-backdrop image hasard        # un tableau au hasard par conversation
+claude-backdrop image hasard        # une image au hasard par conversation
 claude-backdrop image pandemonium   # un tableau fixe : socrates, horatii, pandemonium, school-of-athens
-claude-backdrop image ~/Images/x.jpg   # ton image (fichier ou URL)
+claude-backdrop image ~/Images/x.jpg   # ajoute ton image (fichier ou URL) à la galerie et l'affiche
 claude-backdrop on | off            # active / coupe le thème
 claude-backdrop status              # état de l'installation et de ce que Claude affiche
 ```
@@ -74,12 +74,25 @@ claude-backdrop status              # état de l'installation et de ce que Claud
 
 ### Galerie
 
-Par défaut, **chaque conversation reçoit un tableau au hasard**, stable pour
-cette conversation (un rechargement garde le même). Le tirage se fait parmi les
-tableaux **sombres** (*La Mort de Socrate*, *Le Serment des Horaces*,
-*Pandémonium*) ; *L'École d'Athènes*, plus claire, n'entre dans le tirage que
-si Réglages › Tableaux au hasard vaut « clairs » ou « selon le mode de
-Claude ». Tous sont du domaine public, téléchargés depuis Wikimedia Commons.
+Par défaut, **chaque conversation reçoit une image au hasard**, stable pour
+cette conversation (un rechargement garde la même), tirée de la galerie :
+*La Mort de Socrate*, *Le Serment des Horaces*, *Pandémonium*, *L'École
+d'Athènes* (tous du domaine public, téléchargés depuis Wikimedia Commons), plus
+les images que tu ajoutes.
+
+### Le bouton galerie dans Claude
+
+Un petit bouton 🖼 apparaît **en haut à droite** de Claude. Il ouvre un panneau
+où tu peux, sans passer par le terminal :
+
+- voir les fonds disponibles (avec leur nom) et **changer celui de la fenêtre** d'un clic ;
+- **ajouter ta propre image** (tuile ＋, réduite puis ajoutée à la galerie) ;
+- régler le **flou** et la **luminosité** de l'image avec deux curseurs ;
+- activer/couper l'**image au hasard par conversation** ;
+- **Définir par défaut** l'image affichée (pour toutes les fenêtres).
+
+Il gêne les icônes de la barre de titre ? Déplace-le dans `custom.css` :
+`#cb-gallery-btn { right: 200px !important; }`.
 
 Tout se recharge en direct. Tes propres règles CSS vont dans
 `~/Library/Application Support/ClaudeBackdrop/custom.css` (jamais écrasé) ;
@@ -89,15 +102,17 @@ Tout se recharge en direct. Tes propres règles CSS vont dans
 
 | Réglage (interface)  | Clé de `config.json` | Défaut         | Rôle |
 |----------------------|----------------------|----------------|------|
-| Voile                | `dim`                | `0.55`         | assombrissement du tableau (0 à 0.95) |
-| Flou du tableau      | `imageBlur`          | `6`            | flou de l'image de fond en px (0 à 60) |
-| Verre                | `glass`              | `0.5`          | opacité du verre (barre latérale, panneaux, terminal), 0 à 1 |
+| Voile                | `dim`                | `0.55`         | voile sombre sur l'image (0 à 0.95) |
+| Luminosité           | `brightness`         | `1`            | luminosité de l'image (0.3 à 1.6) — aussi dans le panneau |
+| Opacité de l'image   | `imageOpacity`       | `1`            | opacité de l'image (0.1 à 1) |
+| Flou de l'image      | `imageBlur`          | `6`            | flou de l'image en px (0 à 60) — aussi dans le panneau |
+| Verre                | `glass`              | `0.5`          | opacité du verre (barre latérale, panneaux), 0 à 1 |
 | Flou du verre        | `blur`               | `22`           | flou du verre en px (0 = sans flou) |
+| Terminal             | `terminalOpacity`    | `0.82`         | opacité du terminal, 0.3 à 1 (1 = opaque, sans l'image derrière) |
 | Cadrage              | `position`           | `center`       | `center`, `top`, `bottom` (ou `50% 20%` à la main) |
-| Taille               | `size`               | `cover`        | `cover` (remplit) ou `contain` (tableau entier) |
-| Tableaux au hasard   | `mode`               | `dark`         | `dark`, `light` ou `auto` (suit le thème de Claude) |
+| Taille               | `size`               | `cover`        | `cover` (remplit) ou `contain` (image entière) |
 | Calques opaques      | `autoClear`          | `true`         | détection automatique des calques opaques |
-| Tableau              | `rotate`             | `conversation` | `conversation` = au hasard ; `off` = image fixe |
+| Image                | `rotate`             | `conversation` | `conversation` = au hasard ; `off` = image fixe (`image`) |
 
 ## Mises à jour
 
@@ -175,15 +190,14 @@ go vet ./...
 
 - `cmd/claude-backdrop` — la commande et l'aiguillage vers l'interface
 - `internal/tui` — l'interface ([Bubble Tea](https://github.com/charmbracelet/bubbletea))
-- `internal/backdrop` — réglages, galerie, installation et restauration
+- `internal/backdrop` — réglages, galerie (compatible avec le panneau), installation et restauration
 - `internal/asar` — lecture/patch de l'archive asar (décalage des offsets, empreintes) ;
   `testdata/electron.asar` a été écrit par `@electron/asar`
 - `internal/macos` — Info.plist, signature, sauvegarde, fermeture/relance, `sips`
-- `src/loader.js` + `src/page.js` — ce qui tourne dans Claude ; `src/theme.css` —
-  le thème Ayu Dark ; tous embarqués dans le binaire par `src/embed.go`
-
-L'ancienne version en Node (`src/*.mjs`, `test/`, `package.json`) reste en
-secours : le lanceur s'en sert si Go n'est pas installé.
+- `src/loader.js` (processus principal : réglages, commandes du panneau) +
+  `src/page.js` (dans la page : image, calques, panneau galerie) — ce qui tourne
+  dans Claude ; `src/theme.css` — le thème Ayu Dark ; tous embarqués dans le
+  binaire par `src/embed.go`
 
 ## Crédits
 

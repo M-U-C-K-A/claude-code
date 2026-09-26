@@ -2,7 +2,7 @@
 # claude-backdrop — un tableau derrière Claude Desktop (macOS).
 # Lanceur : retrouve le dossier du dépôt (même via un lien symbolique), compile
 # l'outil (Go) au premier lancement ou quand les sources ont changé, puis lui
-# passe la main. Sans Go, l'ancienne version (Node) sert de secours.
+# passe la main.
 set -euo pipefail
 
 source="${BASH_SOURCE[0]}"
@@ -28,10 +28,6 @@ if stale; then
     echo "› Compilation de claude-backdrop…" >&2
     (cd "$dir" && go build -o "$bin" ./cmd/claude-backdrop)
   elif [ ! -x "$bin" ]; then
-    if command -v node >/dev/null 2>&1; then
-      echo "! Go n'est pas installé : ancienne version (Node), sans l'interface. Pour la nouvelle : brew install go" >&2
-      exec node "$dir/src/cli.mjs" "$@"
-    fi
     echo "✗ Go est requis pour compiler claude-backdrop : brew install go   —   ou https://go.dev/dl" >&2
     exit 1
   fi

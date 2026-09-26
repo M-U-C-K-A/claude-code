@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -29,21 +30,20 @@ func TestReadConfigIsForgiving(t *testing.T) {
 	os.MkdirAll(b.Dir, 0o700)
 	os.WriteFile(b.path("config.json"), []byte(`{
 		"enabled": false, "dim": "très sombre", "blur": 999, "imageBlur": -3,
-		"mode": "sepia", "position": "50% 20%", "size": "stretch", "rotate": "on",
-		"image": "", "somethingElse": 1
+		"brightness": 9, "terminalOpacity": 0, "mode": "sepia", "position": "50% 20%",
+		"size": "stretch", "rotate": "on", "image": "", "somethingElse": 1
 	}`), 0o644)
 	cfg := b.ReadConfig()
 	want := Defaults()
 	want.Enabled = false         // valid, kept
 	want.Blur = 80               // clamped
 	want.ImageBlur = 0           // clamped
+	want.Brightness = 1.6        // clamped
+	want.TerminalOpacity = 0.3   // clamped
 	want.Position = "50% 20%"    // valid, kept
 	want.Rotate = "conversation" // anything but "off" rotates
 	if cfg != want {
 		t.Fatalf("got %+v\nwant %+v", cfg, want)
-	}
-	if b.ReadConfig().Dim != Defaults().Dim {
-		t.Fatal("a wrongly typed value should keep its default")
 	}
 }
 
@@ -61,7 +61,10 @@ func TestMissingOrBrokenConfigGivesDefaults(t *testing.T) {
 
 func TestWriteConfigKeepsTheLoaderKeys(t *testing.T) {
 	b := testBackdrop(t)
-	if _, err := b.UpdateConfig(func(c *Config) { c.Dim = 0.6; c.ImageBlur = 12 }); err != nil {
+	os.MkdirAll(b.Dir, 0o700)
+	// A key this version does not know, as a newer loader could write.
+	os.WriteFile(b.path("config.json"), []byte(`{"dim": 0.4, "futureKnob": {"a": 1}}`), 0o644)
+	if _, err := b.UpdateConfig(func(c *Config) { c.Brightness = 1.2; c.ImageBlur = 12 }); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(b.path("config.json"))
@@ -69,14 +72,18 @@ func TestWriteConfigKeepsTheLoaderKeys(t *testing.T) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
-	// Names the loader (src/loader.js) reads.
-	for _, key := range []string{"enabled", "image", "rotate", "dim", "glass", "blur", "imageBlur", "position", "size", "mode", "autoClear"} {
+	// The names src/loader.js reads.
+	for _, key := range []string{"enabled", "image", "rotate", "dim", "brightness", "imageOpacity", "imageBlur",
+		"glass", "blur", "terminalOpacity", "position", "size", "mode", "autoClear"} {
 		if _, ok := raw[key]; !ok {
 			t.Errorf("config.json lacks %q", key)
 		}
 	}
-	if raw["dim"] != 0.6 || raw["imageBlur"] != 12.0 {
+	if raw["dim"] != 0.4 || raw["brightness"] != 1.2 || raw["imageBlur"] != 12.0 {
 		t.Fatalf("values not written: %s", data)
+	}
+	if _, ok := raw["futureKnob"]; !ok {
+		t.Fatalf("an unknown key was dropped: %s", data)
 	}
 }
 
@@ -109,40 +116,84 @@ func TestEnsureSupportRefreshesThemeButKeepsCustomCSS(t *testing.T) {
 	}
 }
 
-func TestSetFixedImageFromFile(t *testing.T) {
+func writeManifest(t *testing.T, b *Backdrop, entries string) {
+	t.Helper()
+	os.MkdirAll(b.path("gallery"), 0o755)
+	if err := os.WriteFile(b.path("gallery", "manifest.json"), []byte(entries), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestChooseImageAddsYourFileToTheGallery(t *testing.T) {
 	b := testBackdrop(t)
 	picture := filepath.Join(t.TempDir(), "My Picture.jpg")
 	os.WriteFile(picture, []byte("\xff\xd8\xff not really a jpeg"), 0o644)
 	r := &silent{}
-	if err := b.SetFixedImage(picture, r); err != nil {
+	if err := b.ChooseImage(picture, r); err != nil {
 		t.Fatal(err)
 	}
+	images := b.ReadManifest()
+	if len(images) != 1 || !images[0].Custom || images[0].Title != "My Picture" {
+		t.Fatalf("unexpected gallery %+v", images)
+	}
+	if !regexp.MustCompile(`^custom-my-picture-[0-9a-z]+$`).MatchString(images[0].ID) {
+		t.Fatalf("the loader only accepts custom-<slug> ids, got %q", images[0].ID)
+	}
 	cfg := b.ReadConfig()
-	if cfg.Rotating() || cfg.ImageSource != "My Picture.jpg" {
-		t.Fatalf("config not updated: %+v", cfg)
+	if cfg.Rotating() || cfg.Image != "gallery/"+images[0].File || b.FixedID(cfg) != images[0].ID {
+		t.Fatalf("not set as the fixed picture: %+v", cfg)
 	}
-	if b.FixedImagePath() == "" {
-		t.Fatal("fixed picture not stored")
+	if got := b.PictureSummary(cfg); got != "fixe — My Picture" {
+		t.Fatalf("summary %q", got)
 	}
-	if err := b.SetFixedImage(filepath.Join(t.TempDir(), "nope.jpg"), r); err == nil || !IsUserError(err) {
+	if err := b.ChooseImage(filepath.Join(t.TempDir(), "nope.jpg"), r); err == nil || !IsUserError(err) {
 		t.Fatalf("a missing file should be a user error, got %v", err)
 	}
 }
 
-func TestManifestListsOnlyDownloadedPaintings(t *testing.T) {
+func TestManifestKeepsTheImagesAddedInClaude(t *testing.T) {
 	b := testBackdrop(t)
 	os.MkdirAll(b.path("gallery"), 0o755)
-	os.WriteFile(b.PaintingFile("horatii"), []byte("jpeg"), 0o644)
-	os.WriteFile(b.PaintingFile("school-of-athens"), []byte("jpeg"), 0o644)
+	for _, name := range []string{"horatii.jpg", "custom-cat-1.png"} {
+		os.WriteFile(b.path("gallery", name), []byte("img"), 0o644)
+	}
+	// As the panel leaves it: a custom image, one whose file is gone, a duplicate.
+	writeManifest(t, b, `[
+		{"id": "custom-cat-1", "title": "cat", "file": "custom-cat-1.png", "custom": true},
+		{"id": "custom-gone-2", "title": "gone", "file": "custom-gone-2.png", "custom": true},
+		{"id": "custom-cat-1", "title": "cat again", "file": "custom-cat-1.png", "custom": true}
+	]`)
 	n, err := b.writeManifest()
 	if err != nil || n != 2 {
 		t.Fatalf("got %d, %v", n, err)
 	}
-	data, _ := os.ReadFile(b.path("gallery", "manifest.json"))
-	var manifest []struct{ ID, Mode string }
-	json.Unmarshal(data, &manifest)
-	if len(manifest) != 2 || manifest[0].ID != "horatii" || manifest[1].Mode != "light" {
-		t.Fatalf("unexpected manifest: %s", data)
+	images := b.ReadManifest()
+	if len(images) != 2 || images[0].ID != "horatii" || images[0].File != "horatii.jpg" ||
+		images[1].ID != "custom-cat-1" || !images[1].Custom || images[1].Title != "cat" {
+		t.Fatalf("unexpected manifest %+v", images)
+	}
+}
+
+func TestRemoveImage(t *testing.T) {
+	b := testBackdrop(t)
+	os.MkdirAll(b.path("gallery"), 0o755)
+	os.WriteFile(b.path("gallery", "socrates.jpg"), []byte("img"), 0o644)
+	os.WriteFile(b.path("gallery", "custom-cat-1.png"), []byte("img"), 0o644)
+	writeManifest(t, b, `[{"id": "socrates", "file": "socrates.jpg"},
+		{"id": "custom-cat-1", "title": "cat", "file": "custom-cat-1.png", "custom": true}]`)
+	b.UpdateConfig(func(c *Config) { c.Image, c.Rotate = "gallery/custom-cat-1.png", "off" })
+	r := &silent{}
+	if err := b.RemoveImage("socrates", r); err == nil {
+		t.Fatal("a built-in painting must not be removable")
+	}
+	if err := b.RemoveImage("custom-cat-1", r); err != nil {
+		t.Fatal(err)
+	}
+	if len(b.ReadManifest()) != 1 || b.HasPainting("custom-cat-1") {
+		t.Fatal("image not removed")
+	}
+	if !b.ReadConfig().Rotating() {
+		t.Fatal("removing the fixed picture should go back to the random pick")
 	}
 }
 
@@ -154,12 +205,12 @@ func TestGallerySources(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	for _, p := range Gallery {
-		if seen[p.ID] || (p.Mode != "dark" && p.Mode != "light") || len(p.Sources) == 0 {
+		if seen[p.ID] || len(p.Sources) == 0 {
 			t.Errorf("bad gallery entry %+v", p)
 		}
 		seen[p.ID] = true
 		for _, s := range p.Sources {
-			if !strings.HasPrefix(s, "commons:") && !strings.HasPrefix(s, "met:") && !strings.HasPrefix(s, "https://") {
+			if !strings.HasPrefix(s, "commons:") && !strings.HasPrefix(s, "search:") && !strings.HasPrefix(s, "met:") && !strings.HasPrefix(s, "https://") {
 				t.Errorf("%s: unknown source kind %q", p.ID, s)
 			}
 			if strings.Contains(s, "?width=") {
@@ -169,19 +220,50 @@ func TestGallerySources(t *testing.T) {
 	}
 }
 
+func answer(t *testing.T, body string) commonsAnswer {
+	t.Helper()
+	var a commonsAnswer
+	if err := json.Unmarshal([]byte(body), &a); err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
 func TestParseCommons(t *testing.T) {
-	thumb := `{"batchcomplete":true,"query":{"pages":[{"ns":6,"title":"File:A.jpg","imageinfo":[
-		{"thumburl":"https://upload.wikimedia.org/thumb/a/a1/A.jpg/1920px-A.jpg","thumbwidth":1920,"url":"https://upload.wikimedia.org/a/a1/A.jpg"}]}]}}`
-	if got, err := parseCommons([]byte(thumb)); err != nil || !strings.Contains(got, "1920px") {
+	thumb := answer(t, `{"batchcomplete":true,"query":{"pages":[{"ns":6,"title":"File:A.jpg","imageinfo":[
+		{"thumburl":"https://upload.wikimedia.org/thumb/a/a1/A.jpg/1920px-A.jpg","thumbwidth":1920,"url":"https://upload.wikimedia.org/a/a1/A.jpg"}]}]}}`)
+	if got, err := parseCommonsFile(thumb); err != nil || !strings.Contains(got, "1920px") {
 		t.Fatalf("got %q, %v", got, err)
 	}
-	original := `{"query":{"pages":[{"title":"File:B.jpg","imageinfo":[{"url":"https://upload.wikimedia.org/b/B.jpg"}]}]}}`
-	if got, err := parseCommons([]byte(original)); err != nil || got != "https://upload.wikimedia.org/b/B.jpg" {
+	original := answer(t, `{"query":{"pages":[{"title":"File:B.jpg","imageinfo":[{"url":"https://upload.wikimedia.org/b/B.jpg"}]}]}}`)
+	if got, err := parseCommonsFile(original); err != nil || got != "https://upload.wikimedia.org/b/B.jpg" {
 		t.Fatalf("got %q, %v", got, err)
 	}
-	missing := `{"query":{"pages":[{"ns":6,"title":"File:Nope.jpg","missing":true,"known":false}]}}`
-	if _, err := parseCommons([]byte(missing)); err == nil || !strings.Contains(err.Error(), "n'existe pas") {
+	missing := answer(t, `{"query":{"pages":[{"ns":6,"title":"File:Nope.jpg","missing":true,"known":false}]}}`)
+	if _, err := parseCommonsFile(missing); err == nil || !strings.Contains(err.Error(), "n'existe pas") {
 		t.Fatalf("a missing file should say so, got %v", err)
+	}
+	// Search: best ranked photo wins, a PDF or an SVG is skipped.
+	search := answer(t, `{"query":{"pages":[
+		{"title":"File:C.jpg","index":3,"imageinfo":[{"url":"https://u/C.jpg","thumburl":"https://u/1920px-C.jpg"}]},
+		{"title":"File:Scan.pdf","index":1,"imageinfo":[{"url":"https://u/Scan.pdf","thumburl":"https://u/page1-1920px-Scan.pdf.jpg"}]},
+		{"title":"File:D.JPG","index":2,"imageinfo":[{"url":"https://u/D.JPG","thumburl":"https://u/1920px-D.JPG"}]}]}}`)
+	if got, err := parseCommonsSearch(search, "x"); err != nil || got != "https://u/1920px-D.JPG" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	if _, err := parseCommonsSearch(answer(t, `{"batchcomplete":true}`), "rien"); err == nil {
+		t.Fatal("an empty search should fail")
+	}
+}
+
+func TestSlugMatchesTheLoader(t *testing.T) {
+	for in, want := range map[string]string{"My Picture": "my-picture", "  Été 2024 !! ": "t-2024", "": "image", "---": "image"} {
+		if got := slug(in); got != want {
+			t.Errorf("slug(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := slug(strings.Repeat("a", 50)); len(got) != 32 {
+		t.Errorf("slug should cap at 32 characters, got %d", len(got))
 	}
 }
 
@@ -204,7 +286,7 @@ func TestChoiceParsing(t *testing.T) {
 func TestStatusWithoutClaude(t *testing.T) {
 	b := testBackdrop(t)
 	st := b.Status(false)
-	if st.AppFound || st.Loader != LoaderMissing || st.Config != Defaults() {
+	if st.AppFound || st.Loader != LoaderMissing || st.Config != Defaults() || !strings.HasPrefix(st.Picture, "au hasard") {
 		t.Fatalf("unexpected status %+v", st)
 	}
 }

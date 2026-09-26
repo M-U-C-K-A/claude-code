@@ -77,7 +77,6 @@ func pixels(v float64) string  { return fmt.Sprintf("%d px", int(v+0.5)) }
 
 var positionLabels = map[string]string{"center": "centre", "top": "haut", "bottom": "bas"}
 var sizeLabels = map[string]string{"cover": "remplit la fenêtre", "contain": "image entière"}
-var modeLabels = map[string]string{"dark": "sombres", "light": "clairs", "auto": "selon le mode de Claude"}
 
 func labelOf(labels map[string]string, value string) string {
 	if l, ok := labels[value]; ok {
@@ -88,23 +87,6 @@ func labelOf(labels map[string]string, value string) string {
 
 // SettingsSummary is the one-line recap of the rendering settings.
 func SettingsSummary(c backdrop.Config) string {
-	return fmt.Sprintf("voile %s · flou %s · verre %s · flou du verre %s",
-		percent(c.Dim), pixels(c.ImageBlur), percent(c.Glass), pixels(c.Blur))
-}
-
-// PictureSummary says what is behind the conversations.
-func PictureSummary(c backdrop.Config, paintings []string) string {
-	if c.Rotating() {
-		if len(paintings) == 0 {
-			return "au hasard — galerie pas encore téléchargée"
-		}
-		return fmt.Sprintf("au hasard, un par conversation (%d tableaux)", len(paintings))
-	}
-	if p, ok := backdrop.PaintingByID(c.ImageSource); ok {
-		return "fixe — " + p.Title
-	}
-	if c.ImageSource != "" {
-		return "fixe — " + c.ImageSource
-	}
-	return "image fixe"
+	return fmt.Sprintf("voile %s · luminosité %s · flou %s · verre %s",
+		percent(c.Dim), percent(c.Brightness), pixels(c.ImageBlur), percent(c.Glass))
 }

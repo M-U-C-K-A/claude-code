@@ -99,6 +99,7 @@ type Model struct {
 	rescanning bool
 	pointed    bool // the home cursor was placed after the first status
 
+	images  []backdrop.Image // the gallery, for the picture screen
 	thumbs  map[string]string
 	flash   lineMsg
 	spin    spinner.Model
@@ -139,16 +140,18 @@ func (m *Model) loadThumbs() tea.Cmd {
 		return nil
 	}
 	b := m.b
-	fixed := b.FixedImagePath()
+	images := m.images
+	fixed := ""
+	if b.FixedID(m.cfg) == "" {
+		fixed = b.FixedImagePath()
+	}
 	return func() tea.Msg {
 		out := thumbsMsg{}
-		for _, p := range backdrop.Gallery {
-			if b.HasPainting(p.ID) {
-				out[p.ID] = thumbnail(b.PaintingFile(p.ID), previewCols)
-			}
+		for _, img := range images {
+			out[img.ID] = thumbnail(b.ImageFile(img), previewCols)
 		}
 		if fixed != "" {
-			out["fixed"] = thumbnail(fixed, previewCols)
+			out["default"] = thumbnail(fixed, previewCols)
 		}
 		return out
 	}
@@ -232,6 +235,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t := m.task
 		t.running, t.err = false, msg.err
 		m.cfg = m.b.ReadConfig()
+		m.images = m.b.ReadManifest()
 		cmds := []tea.Cmd{m.loadStatus(false), m.loadThumbs()}
 		switch {
 		case msg.err != nil:
@@ -316,8 +320,12 @@ func (m *Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if spec == "" {
 				return m, nil
 			}
-			return m, m.run(&task{title: "Image", autoBack: true, back: scrPaintings}, func(r backdrop.Reporter) (any, error) {
-				return nil, m.b.SetFixedImage(spec, r)
+			return m, m.run(&task{title: "Ajouter une image", autoBack: true, back: scrPaintings}, func(r backdrop.Reporter) (any, error) {
+				img, err := m.b.AddImage(spec, r)
+				if err != nil {
+					return nil, err
+				}
+				return nil, m.b.SetFixed(img.ID, r)
 			})
 		}
 		var cmd tea.Cmd
@@ -388,11 +396,7 @@ func homeIndex(key string) int {
 func (m *Model) homeEntry(key string) (label, detail string) {
 	switch key {
 	case "painting":
-		var present []string
-		if m.st != nil {
-			present = m.st.Paintings
-		}
-		return "Tableau", PictureSummary(m.cfg, present)
+		return "Image", m.b.PictureSummary(m.cfg)
 	case "settings":
 		return "Réglages", SettingsSummary(m.cfg)
 	case "theme":
@@ -437,6 +441,7 @@ func (m *Model) keyHome(k string) (tea.Model, tea.Cmd) {
 	switch homeKeys[m.cursor[scrHome]] {
 	case "painting":
 		m.scr = scrPaintings
+		m.images = m.b.ReadManifest()
 		return m, m.loadThumbs()
 	case "settings":
 		m.scr = scrSettings
@@ -522,40 +527,71 @@ func (m *Model) keyConfirm(k string) (tea.Model, tea.Cmd) {
 
 // ---------------------------------------------------------------- paintings
 
-// Painting list: "random", the gallery, then "custom".
-func paintingKeys() []string {
+// pictureKeys lists the picture screen: "random", the built-in paintings, your
+// images (added here or from the panel in Claude), "default" when the fixed
+// picture is not in the gallery, then "add".
+func (m *Model) pictureKeys() []string {
 	keys := []string{"random"}
 	for _, p := range backdrop.Gallery {
 		keys = append(keys, p.ID)
 	}
-	return append(keys, "custom")
+	for _, img := range m.images {
+		if img.Custom {
+			keys = append(keys, img.ID)
+		}
+	}
+	if !m.cfg.Rotating() && m.b.FixedID(m.cfg) == "" {
+		keys = append(keys, "default")
+	}
+	keys = append(keys, "add")
+	m.cursor[scrPaintings] = min(m.cursor[scrPaintings], len(keys)-1)
+	return keys
+}
+
+func (m *Model) image(id string) (backdrop.Image, bool) {
+	for _, img := range m.images {
+		if img.ID == id {
+			return img, true
+		}
+	}
+	return backdrop.Image{}, false
 }
 
 func (m *Model) keyPaintings(k string) (tea.Model, tea.Cmd) {
-	keys := paintingKeys()
+	keys := m.pictureKeys()
 	if m.move(k, len(keys)) {
 		return m, nil
 	}
+	key := keys[m.cursor[scrPaintings]]
 	switch k {
 	case "esc", "q", "backspace", "left", "h":
 		m.scr = scrHome
+		return m, nil
+	case "x", "delete":
+		if img, ok := m.image(key); ok && img.Custom {
+			return m, m.run(&task{title: "Retirer une image", autoBack: true, back: scrPaintings}, func(r backdrop.Reporter) (any, error) {
+				return nil, m.b.RemoveImage(key, r)
+			})
+		}
 		return m, nil
 	case "enter", " ", "right", "l":
 	default:
 		return m, nil
 	}
-	switch key := keys[m.cursor[scrPaintings]]; key {
+	switch key {
 	case "random":
-		return m, m.run(&task{title: "Tableau", autoBack: true, back: scrPaintings}, func(r backdrop.Reporter) (any, error) {
+		return m, m.run(&task{title: "Image", autoBack: true, back: scrPaintings}, func(r backdrop.Reporter) (any, error) {
 			return nil, m.b.SetRotation(r)
 		})
-	case "custom":
+	case "add":
 		m.scr = scrInput
 		m.input.SetValue("")
 		return m, m.input.Focus()
+	case "default":
+		return m, nil
 	default:
-		return m, m.run(&task{title: "Tableau", autoBack: true, back: scrPaintings}, func(r backdrop.Reporter) (any, error) {
-			return nil, m.b.SetFixedImage(key, r)
+		return m, m.run(&task{title: "Image", autoBack: true, back: scrPaintings}, func(r backdrop.Reporter) (any, error) {
+			return nil, m.b.SetFixed(key, r)
 		})
 	}
 }
@@ -576,28 +612,32 @@ type setting struct {
 	setS    func(c *backdrop.Config, v string)
 }
 
+func slide(name, help string, get func(backdrop.Config) float64, set func(*backdrop.Config, float64), lo, hi, step float64, format func(float64) string) setting {
+	return setting{name: name, help: help, get: get, set: set, lo: lo, hi: hi, step: step, format: format}
+}
+
+// The sliders use the loader's ranges (NUM in src/loader.js).
 var settings = []setting{
-	{name: "Voile", help: "assombrit le tableau pour que le texte reste lisible",
-		get: func(c backdrop.Config) float64 { return c.Dim }, set: func(c *backdrop.Config, v float64) { c.Dim = v },
-		lo: 0, hi: 0.95, step: 0.05, format: percent},
-	{name: "Flou du tableau", help: "floute l'image de fond",
-		get: func(c backdrop.Config) float64 { return c.ImageBlur }, set: func(c *backdrop.Config, v float64) { c.ImageBlur = v },
-		lo: 0, hi: 60, step: 1, format: pixels},
-	{name: "Verre", help: "opacité des panneaux en verre dépoli (barre latérale, terminal)",
-		get: func(c backdrop.Config) float64 { return c.Glass }, set: func(c *backdrop.Config, v float64) { c.Glass = v },
-		lo: 0, hi: 1, step: 0.05, format: percent},
-	{name: "Flou du verre", help: "flou derrière les panneaux (0 = verre net)",
-		get: func(c backdrop.Config) float64 { return c.Blur }, set: func(c *backdrop.Config, v float64) { c.Blur = v },
-		lo: 0, hi: 80, step: 2, format: pixels},
-	{name: "Cadrage", help: "quelle partie du tableau reste visible",
+	slide("Voile", "le voile sombre posé sur l'image, pour que le texte reste lisible",
+		func(c backdrop.Config) float64 { return c.Dim }, func(c *backdrop.Config, v float64) { c.Dim = v }, 0, 0.95, 0.05, percent),
+	slide("Luminosité", "éclaircit ou assombrit l'image elle-même (100 % = telle quelle)",
+		func(c backdrop.Config) float64 { return c.Brightness }, func(c *backdrop.Config, v float64) { c.Brightness = v }, 0.3, 1.6, 0.05, percent),
+	slide("Opacité de l'image", "sous 100 %, le fond sombre transparaît à travers l'image",
+		func(c backdrop.Config) float64 { return c.ImageOpacity }, func(c *backdrop.Config, v float64) { c.ImageOpacity = v }, 0.1, 1, 0.05, percent),
+	slide("Flou de l'image", "floute l'image de fond",
+		func(c backdrop.Config) float64 { return c.ImageBlur }, func(c *backdrop.Config, v float64) { c.ImageBlur = v }, 0, 60, 1, pixels),
+	slide("Verre", "opacité des panneaux en verre dépoli (barre latérale, panneaux)",
+		func(c backdrop.Config) float64 { return c.Glass }, func(c *backdrop.Config, v float64) { c.Glass = v }, 0, 1, 0.05, percent),
+	slide("Flou du verre", "flou derrière les panneaux (0 = verre net)",
+		func(c backdrop.Config) float64 { return c.Blur }, func(c *backdrop.Config, v float64) { c.Blur = v }, 0, 80, 2, pixels),
+	slide("Terminal", "opacité du terminal de Claude Code (100 % = opaque, sans l'image derrière)",
+		func(c backdrop.Config) float64 { return c.TerminalOpacity }, func(c *backdrop.Config, v float64) { c.TerminalOpacity = v }, 0.3, 1, 0.02, percent),
+	{name: "Cadrage", help: "quelle partie de l'image reste visible",
 		choices: []string{"center", "top", "bottom"}, labels: positionLabels,
 		getS: func(c backdrop.Config) string { return c.Position }, setS: func(c *backdrop.Config, v string) { c.Position = v }},
-	{name: "Taille", help: "remplir la fenêtre (en rognant) ou montrer tout le tableau",
+	{name: "Taille", help: "remplir la fenêtre (en rognant) ou montrer toute l'image",
 		choices: []string{"cover", "contain"}, labels: sizeLabels,
 		getS: func(c backdrop.Config) string { return c.Size }, setS: func(c *backdrop.Config, v string) { c.Size = v }},
-	{name: "Tableaux au hasard", help: "lesquels tirer au sort : les sombres, le clair (L'École d'Athènes), ou selon le mode de Claude",
-		choices: []string{"dark", "light", "auto"}, labels: modeLabels,
-		getS: func(c backdrop.Config) string { return c.Mode }, setS: func(c *backdrop.Config, v string) { c.Mode = v }},
 	{name: "Calques opaques", help: "détecte et rend transparents les fonds que le thème ne connaît pas",
 		choices: []string{"on", "off"}, labels: map[string]string{"on": "rendus transparents", "off": "laissés tels quels"},
 		getS: func(c backdrop.Config) string {
@@ -676,7 +716,7 @@ func (m *Model) View() string {
 	case scrHome:
 		body, keys = m.viewHome(), "↑↓ choisir · entrée ouvrir · q quitter"
 	case scrPaintings:
-		body, keys = m.viewPaintings(), "↑↓ choisir · entrée appliquer · échap retour"
+		body, keys = m.viewPaintings(), "↑↓ choisir · entrée appliquer · x retirer une de tes images · échap retour"
 	case scrSettings:
 		body, keys = m.viewSettings(), "↑↓ choisir · ←→ régler (maj : ×5) · d défaut · échap retour"
 	case scrStatus:
@@ -743,49 +783,44 @@ func (m *Model) viewHome() string {
 }
 
 func (m *Model) viewPaintings() string {
-	keys := paintingKeys()
+	keys := m.pictureKeys()
 	cur := keys[m.cursor[scrPaintings]]
-	var lines []string
-	lines = append(lines, sTitle.Render("Tableau de fond"), "")
+	fixed := ""
+	if !m.cfg.Rotating() {
+		fixed = m.b.FixedID(m.cfg)
+	}
+	lines := []string{sTitle.Render("Image de fond"), ""}
 	for i, key := range keys {
-		selected := i == m.cursor[scrPaintings]
 		mark := "  "
 		var label, detail string
 		switch key {
 		case "random":
-			label, detail = "Au hasard", "un tableau différent par conversation"
+			label, detail = "Au hasard", "une image de la galerie par conversation"
 			if m.cfg.Rotating() {
 				mark = sOK.Render("✓ ")
 			}
-		case "custom":
-			label, detail = "Mon image…", "un fichier ou une URL"
-			if !m.cfg.Rotating() && m.cfg.ImageSource != "" {
-				if _, ok := backdrop.PaintingByID(m.cfg.ImageSource); !ok {
-					mark, detail = sOK.Render("✓ "), m.cfg.ImageSource
-				}
-			}
+		case "default":
+			label, detail, mark = "Image par défaut", "choisie depuis le panneau de Claude", sOK.Render("✓ ")
+		case "add":
+			label, detail = "Ajouter une image…", "un fichier ou une URL"
+			lines = append(lines, "")
 		default:
-			p, _ := backdrop.PaintingByID(key)
-			label = p.Title
-			tone := sMuted.Render("sombre")
-			if p.Mode == "light" {
-				tone = sBlue.Render("clair ")
+			if p, ok := backdrop.PaintingByID(key); ok {
+				state := sFaint.Render("○")
+				if _, ok := m.image(key); ok {
+					state = sOK.Render("●")
+				}
+				label, detail = p.Title, fmt.Sprintf("%s %s, %d", state, p.Artist, p.Year)
+			} else if img, ok := m.image(key); ok {
+				label, detail = img.Title, sBlue.Render("●")+" ton image"
 			}
-			state := sFaint.Render("○")
-			if m.b.HasPainting(key) {
-				state = sOK.Render("●")
-			}
-			detail = fmt.Sprintf("%s %s  %s", state, tone, fmt.Sprintf("%s, %d", p.Artist, p.Year))
-			if !m.cfg.Rotating() && m.cfg.ImageSource == key {
+			if key == fixed {
 				mark = sOK.Render("✓ ")
 			}
 		}
-		if key == "custom" {
-			lines = append(lines, "")
-		}
-		lines = append(lines, mark+entry(selected, label, 24, detail))
+		lines = append(lines, mark+entry(i == m.cursor[scrPaintings], shorten(label, 26), 26, detail))
 	}
-	lines = append(lines, "", sMuted.Render("● téléchargé  ○ téléchargé au premier choix"))
+	lines = append(lines, "", sMuted.Render("● téléchargé  ○ téléchargé au premier choix  "+sBlue.Render("●")+sMuted.Render(" ajoutée par toi")))
 	list := strings.Join(lines, "\n")
 	if m.width < minPreviewW {
 		return list
@@ -793,25 +828,32 @@ func (m *Model) viewPaintings() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, list, "    ", m.preview(cur))
 }
 
+func shorten(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return s
+}
+
 func (m *Model) preview(key string) string {
 	var art, caption string
 	switch key {
 	case "random":
-		caption = "Chaque conversation tire un\ntableau parmi les " + labelOf(modeLabels, m.cfg.Mode) + ",\net le garde si tu recharges."
-	case "custom":
-		if !m.cfg.Rotating() {
-			art = m.thumbs["fixed"]
-		}
-		caption = "JPEG, PNG, HEIC… converti et\nredimensionné automatiquement."
+		caption = fmt.Sprintf("Chaque conversation tire une\nimage parmi les %d de la galerie,\net la garde si tu recharges.", len(m.images))
+	case "default":
+		art = m.thumbs["default"]
+		caption = "L'image fixe choisie avec\n« Définir par défaut » dans le\npanneau de Claude."
+	case "add":
+		caption = "JPEG, PNG, HEIC… converti,\nredimensionné, ajouté à la\ngalerie et affiché."
 	default:
-		p, _ := backdrop.PaintingByID(key)
 		art = m.thumbs[key]
-		caption = sText.Render(p.Title) + "\n" + fmt.Sprintf("%s, %d", p.Artist, p.Year)
-		if art == "" && !m.b.HasPainting(key) {
-			caption += "\n\npas encore téléchargé :\nentrée pour le télécharger"
-		}
-		if p.Mode == "light" && m.cfg.Mode == "dark" {
-			caption += "\n\ntableau clair : hors du tirage au\nsort tant que Réglages › Tableaux\nau hasard = sombres"
+		if p, ok := backdrop.PaintingByID(key); ok {
+			caption = sText.Render(p.Title) + "\n" + fmt.Sprintf("%s, %d", p.Artist, p.Year)
+			if _, ok := m.image(key); !ok {
+				caption += "\n\npas encore téléchargé :\nentrée pour le télécharger"
+			}
+		} else if img, ok := m.image(key); ok {
+			caption = sText.Render(img.Title) + "\nton image\n\nx pour la retirer de la galerie"
 		}
 	}
 	parts := []string{}
@@ -848,7 +890,7 @@ func (m *Model) viewSettings() string {
 		if selected {
 			cursor, style = sTitle.Render("› "), sSel
 		}
-		lines = append(lines, cursor+style.Render(fmt.Sprintf("%-19s", s.name))+" "+value)
+		lines = append(lines, cursor+style.Render(fmt.Sprintf("%-20s", s.name))+" "+value)
 	}
 	lines = append(lines, "", sMuted.Render(settings[m.cursor[scrSettings]].help))
 	return strings.Join(lines, "\n")

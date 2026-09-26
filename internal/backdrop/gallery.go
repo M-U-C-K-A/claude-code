@@ -1,8 +1,11 @@
 package backdrop
 
-// The background pictures: a small built-in gallery of public-domain paintings,
-// plus any file or URL the user points at. Downloads are converted to JPEG with
-// macOS `sips` (plain copy elsewhere).
+// The background pictures, all kept in <Dir>/gallery and listed in
+// gallery/manifest.json: the built-in public-domain paintings, plus your own
+// images, added here or from the gallery panel inside Claude (entries marked
+// `custom`). The loader ships every listed picture to the page, which draws
+// one per conversation, or shows the fixed one (config `image`). Downloads are
+// converted to JPEG with macOS `sips` (plain copy elsewhere).
 
 import (
 	"encoding/json"
@@ -12,8 +15,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -21,17 +26,16 @@ import (
 	"github.com/M-U-C-K-A/claude-code/internal/macos"
 )
 
-// Painting is a gallery entry. Mode says which Claude appearance it suits: the
-// dark, dramatic ones for dark mode, the bright fresco for light mode.
+// Painting is a built-in gallery entry.
 type Painting struct {
 	ID     string
-	Mode   string // "dark" or "light"
 	Title  string
 	Artist string
 	Year   int
 	// Tried in order, the first that downloads wins: "commons:<file>" (a
-	// Wikimedia Commons file, resolved through its API), "met:<object id>"
-	// (The Met's open-access API), or a plain URL.
+	// Wikimedia Commons file, resolved through its API), "search:<words>" (the
+	// best matching Commons file), "met:<object id>" (The Met's open-access
+	// API), or a plain URL.
 	Sources []string
 }
 
@@ -39,37 +43,41 @@ func (p Painting) Label() string {
 	return fmt.Sprintf("%s — %s, %d", p.Title, p.Artist, p.Year)
 }
 
-// Gallery lists the built-in paintings. File names checked against Commons.
+// Gallery lists the built-in paintings. File names checked against Commons;
+// the search is a last resort should a file be renamed.
 var Gallery = []Painting{
 	{
-		ID: "socrates", Mode: "dark", Title: "La Mort de Socrate", Artist: "Jacques-Louis David", Year: 1787,
+		ID: "socrates", Title: "La Mort de Socrate", Artist: "Jacques-Louis David", Year: 1787,
 		Sources: []string{"commons:David - The Death of Socrates.jpg", "met:436105"},
 	},
 	{
-		ID: "horatii", Mode: "dark", Title: "Le Serment des Horaces", Artist: "Jacques-Louis David", Year: 1784,
+		ID: "horatii", Title: "Le Serment des Horaces", Artist: "Jacques-Louis David", Year: 1784,
 		Sources: []string{
 			"commons:David-Oath of the Horatii-1784.jpg",
 			"commons:Jacques-Louis David - Oath of the Horatii - Google Art Project.jpg",
+			"search:Jacques-Louis David Oath of the Horatii",
 		},
 	},
 	{
-		ID: "pandemonium", Mode: "dark", Title: "Pandémonium", Artist: "John Martin", Year: 1841,
+		ID: "pandemonium", Title: "Pandémonium", Artist: "John Martin", Year: 1841,
 		Sources: []string{
 			"commons:John Martin - Pandemonium - WGA14149.jpg",
 			"commons:John Martin Le Pandemonium Louvre.JPG",
 			"commons:John-Martin-Pandemonium-color-sharpend.jpg",
+			"search:John Martin Pandemonium 1841",
 		},
 	},
 	{
-		ID: "school-of-athens", Mode: "light", Title: "L'École d'Athènes", Artist: "Raphaël", Year: 1511,
+		ID: "school-of-athens", Title: "L'École d'Athènes", Artist: "Raphaël", Year: 1511,
 		Sources: []string{
 			`commons:"The School of Athens" by Raffaello Sanzio da Urbino.jpg`,
 			"commons:Raphael School of Athens.jpg",
+			"search:Raphael School of Athens Stanza",
 		},
 	},
 }
 
-// PaintingByID finds a gallery entry (a few French aliases accepted).
+// PaintingByID finds a built-in painting (a few French aliases accepted).
 func PaintingByID(id string) (Painting, bool) {
 	id = strings.ToLower(strings.TrimSpace(id))
 	switch id {
@@ -88,7 +96,7 @@ func PaintingByID(id string) (Painting, bool) {
 	return Painting{}, false
 }
 
-// IsRandomChoice tells whether the user asked for a painting per conversation.
+// IsRandomChoice tells whether the user asked for a picture per conversation.
 func IsRandomChoice(spec string) bool {
 	switch strings.ToLower(strings.TrimSpace(spec)) {
 	case "random", "hasard", "aleatoire", "aléatoire", "rotation", "galerie", "gallery":
@@ -97,12 +105,122 @@ func IsRandomChoice(spec string) bool {
 	return false
 }
 
-// PaintingFile is where a gallery painting is stored once downloaded.
+// PaintingFile is where a built-in painting is stored once downloaded.
 func (b *Backdrop) PaintingFile(id string) string { return b.path("gallery", id+".jpg") }
 
 func (b *Backdrop) HasPainting(id string) bool {
 	_, err := os.Stat(b.PaintingFile(id))
 	return err == nil
+}
+
+// ---------------------------------------------------------------- manifest
+
+// Image is an entry of gallery/manifest.json.
+type Image struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	File   string `json:"file"`
+	Custom bool   `json:"custom,omitempty"`
+}
+
+// ImageFile is where a gallery picture sits on disk.
+func (b *Backdrop) ImageFile(img Image) string { return b.path("gallery", img.File) }
+
+// ReadManifest lists the pictures in the gallery (only those on disk).
+func (b *Backdrop) ReadManifest() []Image {
+	data, err := os.ReadFile(b.path("gallery", "manifest.json"))
+	if err != nil {
+		return nil
+	}
+	var entries []Image
+	if json.Unmarshal(data, &entries) != nil {
+		return nil
+	}
+	var out []Image
+	seen := map[string]bool{}
+	for _, e := range entries {
+		if e.ID == "" || seen[e.ID] {
+			continue
+		}
+		if e.File == "" {
+			e.File = e.ID + ".jpg"
+		}
+		e.File = path.Base(e.File)
+		if _, err := os.Stat(b.ImageFile(e)); err != nil {
+			continue
+		}
+		if e.Title == "" {
+			e.Title = e.ID
+		}
+		seen[e.ID] = true
+		out = append(out, e)
+	}
+	return out
+}
+
+// writeManifest lists the built-in paintings on disk, then the custom images
+// already listed (the panel in Claude adds some), deduplicated. Returns how
+// many pictures the gallery holds.
+func (b *Backdrop) writeManifest() (int, error) {
+	if err := os.MkdirAll(b.path("gallery"), 0o755); err != nil {
+		return 0, err
+	}
+	manifest := []Image{}
+	seen := map[string]bool{}
+	for _, p := range Gallery {
+		if b.HasPainting(p.ID) {
+			manifest = append(manifest, Image{ID: p.ID, Title: p.Label(), File: p.ID + ".jpg"})
+			seen[p.ID] = true
+		}
+	}
+	for _, img := range b.ReadManifest() {
+		if img.Custom && !seen[img.ID] {
+			manifest = append(manifest, img)
+			seen[img.ID] = true
+		}
+	}
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return 0, err
+	}
+	return len(manifest), writeAtomic(b.path("gallery", "manifest.json"), append(data, '\n'))
+}
+
+// FixedID is the gallery id of the fixed picture, or "" when it is not one
+// (the default background.<ext>, set from the panel's "Définir par défaut").
+func (b *Backdrop) FixedID(cfg Config) string {
+	file, ok := strings.CutPrefix(cfg.Image, "gallery/")
+	if !ok {
+		return ""
+	}
+	for _, img := range b.ReadManifest() {
+		if img.File == file {
+			return img.ID
+		}
+	}
+	return ""
+}
+
+// PictureSummary says in a few words what is behind the conversations.
+func (b *Backdrop) PictureSummary(cfg Config) string {
+	if cfg.Rotating() {
+		n := len(b.ReadManifest())
+		if n == 0 {
+			return "au hasard — galerie vide pour l'instant"
+		}
+		return fmt.Sprintf("au hasard, une par conversation (%d images)", n)
+	}
+	if id := b.FixedID(cfg); id != "" {
+		if p, ok := PaintingByID(id); ok {
+			return "fixe — " + p.Title
+		}
+		for _, img := range b.ReadManifest() {
+			if img.ID == id {
+				return "fixe — " + img.Title
+			}
+		}
+	}
+	return "fixe — image par défaut"
 }
 
 // ---------------------------------------------------------------- downloads
@@ -114,9 +232,8 @@ const commonsWidth = 1920
 const (
 	userAgent      = "claude-backdrop/" + Version + " (https://github.com/M-U-C-K-A/claude-code)"
 	maxDownload    = 40 << 20
-	maxRawBytes    = 24 << 20 // without sips, the picture is used as is
-	fixedMaxSide   = 2560
-	galleryMaxSide = 1600 // smaller: every gallery picture ships to each page
+	maxRawBytes    = 16 << 20 // without sips, the picture is used as is (the loader's limit)
+	galleryMaxSide = 1600     // every gallery picture ships to each page
 )
 
 var client = &http.Client{Timeout: 90 * time.Second}
@@ -159,39 +276,56 @@ func getJSON(rawURL string, into any) error {
 	return json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(into)
 }
 
-// commonsImageURL asks the Commons API for a 1920 px rendition of a file (or
-// the original when it is smaller). The API follows renames and says clearly
-// when a file does not exist.
-func commonsImageURL(file string) (string, error) {
-	query := url.Values{
-		"action": {"query"}, "format": {"json"}, "formatversion": {"2"}, "redirects": {"1"},
-		"prop": {"imageinfo"}, "iiprop": {"url|mime"}, "iiurlwidth": {strconv.Itoa(commonsWidth)},
-		"titles": {"File:" + file},
-	}
-	var body json.RawMessage
-	if err := getJSON("https://commons.wikimedia.org/w/api.php?"+query.Encode(), &body); err != nil {
-		return "", fmt.Errorf("API Commons : %w", err)
-	}
-	return parseCommons(body)
+type commonsPage struct {
+	Title     string `json:"title"`
+	Index     int    `json:"index"`
+	Missing   bool   `json:"missing"`
+	Invalid   bool   `json:"invalid"`
+	ImageInfo []struct {
+		URL      string `json:"url"`
+		ThumbURL string `json:"thumburl"`
+	} `json:"imageinfo"`
 }
 
-func parseCommons(body []byte) (string, error) {
-	var answer struct {
-		Query struct {
-			Pages []struct {
-				Title     string `json:"title"`
-				Missing   bool   `json:"missing"`
-				Invalid   bool   `json:"invalid"`
-				ImageInfo []struct {
-					URL      string `json:"url"`
-					ThumbURL string `json:"thumburl"`
-				} `json:"imageinfo"`
-			} `json:"pages"`
-		} `json:"query"`
+type commonsAnswer struct {
+	Query struct {
+		Pages []commonsPage `json:"pages"`
+	} `json:"query"`
+}
+
+func commonsQuery(params url.Values) (commonsAnswer, error) {
+	params.Set("action", "query")
+	params.Set("format", "json")
+	params.Set("formatversion", "2")
+	params.Set("prop", "imageinfo")
+	params.Set("iiprop", "url")
+	params.Set("iiurlwidth", strconv.Itoa(commonsWidth))
+	var body json.RawMessage
+	if err := getJSON("https://commons.wikimedia.org/w/api.php?"+params.Encode(), &body); err != nil {
+		return commonsAnswer{}, fmt.Errorf("API Commons : %w", err)
 	}
+	var answer commonsAnswer
 	if err := json.Unmarshal(body, &answer); err != nil {
-		return "", fmt.Errorf("réponse Commons illisible : %w", err)
+		return answer, fmt.Errorf("réponse Commons illisible : %w", err)
 	}
+	return answer, nil
+}
+
+// bestURL is the 1920 px rendition of a page (or the original when smaller).
+func (p commonsPage) bestURL() string {
+	for _, info := range p.ImageInfo {
+		if info.ThumbURL != "" {
+			return info.ThumbURL
+		}
+		if info.URL != "" {
+			return info.URL
+		}
+	}
+	return ""
+}
+
+// parseCommonsFile picks the image of a single-file answer.
+func parseCommonsFile(answer commonsAnswer) (string, error) {
 	if len(answer.Query.Pages) == 0 {
 		return "", errors.New("réponse Commons vide")
 	}
@@ -199,32 +333,26 @@ func parseCommons(body []byte) (string, error) {
 	if page.Missing || page.Invalid {
 		return "", fmt.Errorf("%s n'existe pas sur Commons", page.Title)
 	}
-	for _, info := range page.ImageInfo {
-		if info.ThumbURL != "" {
-			return info.ThumbURL, nil
-		}
-		if info.URL != "" {
-			return info.URL, nil
-		}
+	if u := page.bestURL(); u != "" {
+		return u, nil
 	}
 	return "", errors.New("pas d'image dans la réponse Commons")
 }
 
-func metImageURL(id string) (string, error) {
-	var object struct {
-		PrimaryImage      string `json:"primaryImage"`
-		PrimaryImageSmall string `json:"primaryImageSmall"`
+var photoRE = regexp.MustCompile(`(?i)\.(jpe?g|png)$`)
+
+// parseCommonsSearch picks the best ranked JPEG or PNG of a search answer.
+func parseCommonsSearch(answer commonsAnswer, words string) (string, error) {
+	pages := answer.Query.Pages
+	sort.SliceStable(pages, func(i, j int) bool { return pages[i].Index < pages[j].Index })
+	for _, page := range pages {
+		for _, info := range page.ImageInfo {
+			if photoRE.MatchString(strings.SplitN(info.URL, "?", 2)[0]) {
+				return page.bestURL(), nil
+			}
+		}
 	}
-	if err := getJSON("https://collectionapi.metmuseum.org/public/collection/v1/objects/"+id, &object); err != nil {
-		return "", fmt.Errorf("API du Met : %w", err)
-	}
-	if object.PrimaryImage != "" {
-		return object.PrimaryImage, nil
-	}
-	if object.PrimaryImageSmall != "" {
-		return object.PrimaryImageSmall, nil
-	}
-	return "", errors.New("API du Met : pas d'image")
+	return "", fmt.Errorf("aucune image pour « %s »", words)
 }
 
 // fetchImage downloads one source into a temporary file.
@@ -233,7 +361,16 @@ func fetchImage(source string) (string, error) {
 	var err error
 	switch {
 	case strings.HasPrefix(source, "commons:"):
-		target, err = commonsImageURL(strings.TrimPrefix(source, "commons:"))
+		var answer commonsAnswer
+		if answer, err = commonsQuery(url.Values{"redirects": {"1"}, "titles": {"File:" + strings.TrimPrefix(source, "commons:")}}); err == nil {
+			target, err = parseCommonsFile(answer)
+		}
+	case strings.HasPrefix(source, "search:"):
+		words := strings.TrimPrefix(source, "search:")
+		var answer commonsAnswer
+		if answer, err = commonsQuery(url.Values{"generator": {"search"}, "gsrnamespace": {"6"}, "gsrlimit": {"8"}, "gsrsearch": {words}}); err == nil {
+			target, err = parseCommonsSearch(answer, words)
+		}
 	case strings.HasPrefix(source, "met:"):
 		target, err = metImageURL(strings.TrimPrefix(source, "met:"))
 	}
@@ -271,6 +408,23 @@ func fetchImage(source string) (string, error) {
 	return file, os.WriteFile(file, data, 0o600)
 }
 
+func metImageURL(id string) (string, error) {
+	var object struct {
+		PrimaryImage      string `json:"primaryImage"`
+		PrimaryImageSmall string `json:"primaryImageSmall"`
+	}
+	if err := getJSON("https://collectionapi.metmuseum.org/public/collection/v1/objects/"+id, &object); err != nil {
+		return "", fmt.Errorf("API du Met : %w", err)
+	}
+	if object.PrimaryImage != "" {
+		return object.PrimaryImage, nil
+	}
+	if object.PrimaryImageSmall != "" {
+		return object.PrimaryImageSmall, nil
+	}
+	return "", errors.New("API du Met : pas d'image")
+}
+
 // Download tries each source in order; the error lists why each one failed.
 func Download(sources []string) (string, error) {
 	var failures []string
@@ -289,6 +443,8 @@ func sourceName(source string) string {
 	switch {
 	case strings.HasPrefix(source, "commons:"):
 		return "Wikimedia Commons « " + strings.TrimPrefix(source, "commons:") + " »"
+	case strings.HasPrefix(source, "search:"):
+		return "recherche Commons « " + strings.TrimPrefix(source, "search:") + " »"
 	case strings.HasPrefix(source, "met:"):
 		return "The Met (objet " + strings.TrimPrefix(source, "met:") + ")"
 	}
@@ -300,7 +456,6 @@ func sourceName(source string) string {
 
 // ImageFacts describes a stored picture.
 type ImageFacts struct {
-	Name          string
 	Width, Height int
 	Bytes         int64
 }
@@ -324,14 +479,14 @@ func convert(input, dest string, maxSide int) (ImageFacts, error) {
 		return ImageFacts{}, err
 	}
 	staging := dest + ".new"
-	facts := ImageFacts{Name: filepath.Base(dest)}
+	var facts ImageFacts
 	if macos.HasSips() {
 		if facts.Width, facts.Height, err = macos.ToJpeg(input, staging, maxSide); err != nil {
 			return ImageFacts{}, err
 		}
 	} else {
 		if info.Size() > maxRawBytes {
-			return ImageFacts{}, userErrorf("image trop lourde (24 Mo max sans sips)")
+			return ImageFacts{}, userErrorf("image trop lourde (16 Mo max sans sips)")
 		}
 		data, err := os.ReadFile(input)
 		if err != nil {
@@ -350,101 +505,134 @@ func convert(input, dest string, maxSide int) (ImageFacts, error) {
 	return facts, nil
 }
 
-var (
-	backgroundRE = regexp.MustCompile(`(?i)^background\.[a-z0-9]+$`)
-	urlRE        = regexp.MustCompile(`(?i)^https?://`)
-)
-
-// storeFixed saves the chosen fixed picture as background.jpg in the support
-// folder, and removes older background.* files.
-func (b *Backdrop) storeFixed(input string) (ImageFacts, error) {
-	name := "background.jpg"
-	if !macos.HasSips() {
-		ext := strings.ToLower(filepath.Ext(input))
-		if ext == "" {
-			ext = ".jpg"
-		}
-		name = "background" + ext
-	}
-	facts, err := convert(input, b.path(name), fixedMaxSide)
-	if err != nil {
-		return facts, err
-	}
-	entries, _ := os.ReadDir(b.Dir)
-	for _, e := range entries {
-		if e.Name() != name && backgroundRE.MatchString(e.Name()) {
-			os.Remove(b.path(e.Name()))
-		}
-	}
-	return facts, nil
-}
-
 // ---------------------------------------------------------------- choosing
 
-// SetFixedImage puts one picture behind every conversation (turns rotation
-// off): a gallery id, a file, or a URL.
-func (b *Backdrop) SetFixedImage(spec string, r Reporter) error {
+var (
+	urlRE     = regexp.MustCompile(`(?i)^https?://`)
+	nonSlugRE = regexp.MustCompile(`[^a-z0-9]+`)
+)
+
+// slug is the loader's: lowercase words joined by dashes, 32 characters max.
+func slug(s string) string {
+	s = strings.Trim(nonSlugRE.ReplaceAllString(strings.ToLower(s), "-"), "-")
+	if len(s) > 32 {
+		s = strings.Trim(s[:32], "-")
+	}
+	if s == "" {
+		return "image"
+	}
+	return s
+}
+
+// ensurePainting downloads a built-in painting into the gallery if needed.
+func (b *Backdrop) ensurePainting(p Painting, r Reporter) error {
+	if b.HasPainting(p.ID) {
+		return nil
+	}
+	r.Step("Téléchargement : " + p.Label())
+	tmp, err := Download(p.Sources)
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(filepath.Dir(tmp))
+	if _, err := convert(tmp, b.PaintingFile(p.ID), galleryMaxSide); err != nil {
+		return err
+	}
+	_, err = b.writeManifest()
+	return err
+}
+
+// AddImage puts your own picture (a file or a URL) in the gallery, like the
+// ＋ tile of the panel in Claude does.
+func (b *Backdrop) AddImage(spec string, r Reporter) (Image, error) {
+	if err := b.EnsureSupport(); err != nil {
+		return Image{}, err
+	}
+	spec = strings.TrimSpace(spec)
+	var input, name string
+	if urlRE.MatchString(spec) {
+		r.Step("Téléchargement de " + spec)
+		tmp, err := Download([]string{spec})
+		if err != nil {
+			return Image{}, err
+		}
+		defer os.RemoveAll(filepath.Dir(tmp))
+		input = tmp
+		if u, err := url.Parse(spec); err == nil {
+			name = path.Base(u.Path)
+		}
+	} else {
+		abs, err := filepath.Abs(ExpandHome(spec))
+		if err != nil {
+			return Image{}, err
+		}
+		if _, err := os.Stat(abs); err != nil {
+			return Image{}, userErrorf("Fichier introuvable : %s", abs)
+		}
+		input, name = abs, filepath.Base(abs)
+	}
+	title := strings.TrimSuffix(name, path.Ext(name))
+	if title == "" || title == "." || title == "/" {
+		title = "Mon image"
+	}
+	ext := ".jpg"
+	if !macos.HasSips() {
+		ext = strings.ToLower(filepath.Ext(input))
+	}
+	img := Image{ID: "custom-" + slug(title) + "-" + strconv.FormatInt(time.Now().UnixMilli(), 36), Title: title, Custom: true}
+	img.File = img.ID + ext
+	facts, err := convert(input, b.ImageFile(img), galleryMaxSide)
+	if err != nil {
+		return Image{}, err
+	}
+	manifest := append(b.ReadManifest(), img)
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err == nil {
+		err = writeAtomic(b.path("gallery", "manifest.json"), append(data, '\n'))
+	}
+	if err != nil {
+		return Image{}, err
+	}
+	r.OK(fmt.Sprintf("Ajoutée à la galerie : %s (%s)", title, facts))
+	return img, nil
+}
+
+// SetFixed puts one gallery picture behind every conversation (turns the
+// random pick off). A built-in painting is downloaded first if needed.
+func (b *Backdrop) SetFixed(id string, r Reporter) error {
 	if err := b.EnsureSupport(); err != nil {
 		return err
 	}
-	var input, label, source string
-	var err error
-	downloaded := false
-	spec = strings.TrimSpace(spec)
-	if painting, ok := PaintingByID(spec); ok {
-		label, source = painting.Label(), painting.ID
-		r.Step("Téléchargement : " + label)
-		input, err = Download(painting.Sources)
-		downloaded = err == nil
-		if err != nil && b.HasPainting(painting.ID) {
-			r.Warn("Téléchargement impossible, j'utilise la copie de la galerie (plus petite).")
-			input, err = b.PaintingFile(painting.ID), nil
+	title := ""
+	if p, ok := PaintingByID(id); ok {
+		if err := b.ensurePainting(p, r); err != nil {
+			return err
 		}
-	} else if urlRE.MatchString(spec) {
-		label, source = spec, spec
-		r.Step("Téléchargement de " + spec)
-		input, err = Download([]string{spec})
-		downloaded = err == nil
-	} else {
-		input, err = filepath.Abs(ExpandHome(spec))
-		label, source = filepath.Base(input), filepath.Base(input)
-		if err == nil {
-			if _, statErr := os.Stat(input); statErr != nil {
-				err = userErrorf("Fichier introuvable : %s", input)
-			}
+		id, title = p.ID, p.Title
+	}
+	for _, img := range b.ReadManifest() {
+		if img.ID != id {
+			continue
 		}
-	}
-	if err != nil {
-		return err
-	}
-	if downloaded {
-		defer os.RemoveAll(filepath.Dir(input))
-	}
-	facts, err := b.storeFixed(input)
-	if err != nil {
-		return err
-	}
-	// A gallery painting fetched for the first time joins the gallery too
-	// (preview, rotation), so it is not downloaded twice.
-	if painting, ok := PaintingByID(source); ok && downloaded && !b.HasPainting(painting.ID) {
-		if _, err := convert(input, b.PaintingFile(painting.ID), galleryMaxSide); err == nil {
-			b.writeManifest()
+		if title == "" {
+			title = img.Title
 		}
+		if _, err := b.UpdateConfig(func(c *Config) { c.Image, c.Rotate = "gallery/"+img.File, "off" }); err != nil {
+			return err
+		}
+		r.OK("Image fixe : " + title)
+		return nil
 	}
-	if _, err := b.UpdateConfig(func(c *Config) { c.Image, c.ImageSource, c.Rotate = facts.Name, source, "off" }); err != nil {
-		return err
-	}
-	r.OK(fmt.Sprintf("Image fixe : %s (%s)", label, facts))
-	return nil
+	return userErrorf("« %s » n'est pas dans la galerie", id)
 }
 
-// SetRotation gives each conversation its own painting, downloading the
-// missing ones first.
+// SetRotation gives each conversation its own picture, downloading the missing
+// paintings first.
 func (b *Backdrop) SetRotation(r Reporter) error {
 	if err := b.EnsureSupport(); err != nil {
 		return err
 	}
-	available, err := b.EnsureGallery(r, false)
+	available, err := b.EnsureGallery(r)
 	if err != nil {
 		return err
 	}
@@ -452,62 +640,77 @@ func (b *Backdrop) SetRotation(r Reporter) error {
 		return err
 	}
 	if available == 0 {
-		r.Warn("Aucun tableau téléchargé : Claude garde l'image fixe en attendant.")
+		r.Warn("Galerie vide : Claude garde l'image par défaut en attendant.")
 		return nil
 	}
-	r.OK(fmt.Sprintf("Un tableau au hasard par conversation (%d disponibles)", available))
+	r.OK(fmt.Sprintf("Une image au hasard par conversation (%d dans la galerie)", available))
 	return nil
 }
 
-// ChooseImage handles `claude-backdrop image <choice>`.
+// RemoveImage takes one of your images out of the gallery (the built-in
+// paintings stay).
+func (b *Backdrop) RemoveImage(id string, r Reporter) error {
+	var kept []Image
+	var removed *Image
+	for _, img := range b.ReadManifest() {
+		if img.ID == id && img.Custom {
+			removed = &img
+			continue
+		}
+		kept = append(kept, img)
+	}
+	if removed == nil {
+		return userErrorf("Seules tes propres images se retirent de la galerie.")
+	}
+	data, err := json.MarshalIndent(append([]Image{}, kept...), "", "  ")
+	if err == nil {
+		err = writeAtomic(b.path("gallery", "manifest.json"), append(data, '\n'))
+	}
+	if err != nil {
+		return err
+	}
+	os.Remove(b.ImageFile(*removed))
+	if cfg := b.ReadConfig(); cfg.Image == "gallery/"+removed.File {
+		if _, err := b.UpdateConfig(func(c *Config) { c.Rotate = "conversation" }); err != nil {
+			return err
+		}
+		r.Note("C'était l'image fixe : retour au hasard.")
+	}
+	r.OK("Retirée de la galerie : " + removed.Title)
+	return nil
+}
+
+// ChooseImage handles `claude-backdrop image <choice>`: "hasard", a gallery
+// id, or a file / URL to add and show.
 func (b *Backdrop) ChooseImage(spec string, r Reporter) error {
 	if IsRandomChoice(spec) {
 		return b.SetRotation(r)
 	}
-	return b.SetFixedImage(spec, r)
+	if _, ok := PaintingByID(spec); ok {
+		return b.SetFixed(spec, r)
+	}
+	for _, img := range b.ReadManifest() {
+		if img.ID == spec {
+			return b.SetFixed(spec, r)
+		}
+	}
+	img, err := b.AddImage(spec, r)
+	if err != nil {
+		return err
+	}
+	return b.SetFixed(img.ID, r)
 }
 
-// EnsureGallery downloads the missing paintings (all of them with force) and
-// rewrites the manifest the loader reads. Returns how many are available.
-func (b *Backdrop) EnsureGallery(r Reporter, force bool) (int, error) {
+// EnsureGallery downloads the missing paintings and rewrites the manifest the
+// loader reads. Returns how many pictures the gallery holds.
+func (b *Backdrop) EnsureGallery(r Reporter) (int, error) {
 	if err := os.MkdirAll(b.path("gallery"), 0o755); err != nil {
 		return 0, err
 	}
-	for _, painting := range Gallery {
-		dest := b.PaintingFile(painting.ID)
-		if !force && b.HasPainting(painting.ID) {
-			continue
-		}
-		r.Step("Téléchargement : " + painting.Label())
-		tmp, err := Download(painting.Sources)
-		if err == nil {
-			_, err = convert(tmp, dest, galleryMaxSide)
-			os.RemoveAll(filepath.Dir(tmp))
-		}
-		if err != nil {
-			r.Warn(fmt.Sprintf("%s indisponible : %s", painting.Title, err))
+	for _, p := range Gallery {
+		if err := b.ensurePainting(p, r); err != nil {
+			r.Warn(fmt.Sprintf("%s indisponible : %s", p.Title, err))
 		}
 	}
 	return b.writeManifest()
-}
-
-// writeManifest lists the paintings actually on disk, each with its light/dark
-// tag, so the loader offers only those.
-func (b *Backdrop) writeManifest() (int, error) {
-	type entry struct {
-		ID    string `json:"id"`
-		Mode  string `json:"mode"`
-		Title string `json:"title"`
-	}
-	manifest := []entry{}
-	for _, painting := range Gallery {
-		if b.HasPainting(painting.ID) {
-			manifest = append(manifest, entry{painting.ID, painting.Mode, painting.Label()})
-		}
-	}
-	data, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		return 0, err
-	}
-	return len(manifest), writeAtomic(b.path("gallery", "manifest.json"), append(data, '\n'))
 }

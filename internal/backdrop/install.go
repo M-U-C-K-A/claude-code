@@ -210,20 +210,19 @@ func (b *Backdrop) PrepareInstall(opts InstallOptions, r Reporter) (*InstallPlan
 			return nil, err
 		}
 	}
-	if b.ReadConfig().Rotating() {
-		available, err := b.EnsureGallery(r, false)
-		if err != nil {
-			return nil, err
-		}
-		if available == 0 {
-			r.Warn("Aucun tableau téléchargé : le thème marche, mais sans image. Réessaie plus tard depuis « Tableau ».")
-		} else {
-			r.OK(fmt.Sprintf("%d tableaux prêts, un au hasard par conversation", available))
-		}
-	} else if b.FixedImagePath() == "" {
-		if err := b.SetFixedImage("socrates", r); err != nil {
+	available, err := b.EnsureGallery(r)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case !b.ReadConfig().Rotating() && b.FixedImagePath() == "":
+		if err := b.SetFixed("socrates", r); err != nil {
 			r.Warn("Image par défaut indisponible : le thème marche quand même, choisis une image ensuite.")
 		}
+	case available == 0:
+		r.Warn("Aucun tableau téléchargé : le thème marche, mais sans image. Réessaie plus tard depuis « Image ».")
+	default:
+		r.OK(fmt.Sprintf("%d images dans la galerie", available))
 	}
 	r.OK("Thème prêt dans " + b.Dir)
 

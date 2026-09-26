@@ -92,54 +92,63 @@ func requireMac() error {
 
 // ---------------------------------------------------------------- config
 
-// Config is config.json, read live by the loader inside Claude.
+// Config is config.json, read live by the loader inside Claude. The loader
+// writes it too (the gallery panel in Claude), so keys this version does not
+// know are kept as they are.
 type Config struct {
-	Enabled bool   `json:"enabled"`
-	Image   string `json:"image"` // the fixed picture, relative to Dir
-	// ImageSource says where the fixed picture came from (a gallery id, a file
-	// name, a URL), for display only: the loader ignores it.
-	ImageSource string  `json:"imageSource,omitempty"`
-	Rotate      string  `json:"rotate"` // "conversation" = a random painting per conversation, "off" = fixed
-	Dim         float64 `json:"dim"`
-	Glass       float64 `json:"glass"`
-	Blur        float64 `json:"blur"`
-	ImageBlur   float64 `json:"imageBlur"`
-	Position    string  `json:"position"`
-	Size        string  `json:"size"`
-	Mode        string  `json:"mode"` // which paintings rotate: "dark", "light", or "auto" (follow Claude)
-	AutoClear   bool    `json:"autoClear"`
-	Refresh     int64   `json:"refresh,omitempty"` // bumped to ask the loader for a fresh report
+	Enabled         bool    `json:"enabled"`
+	Image           string  `json:"image"`  // the fixed picture, relative to Dir ("gallery/<file>" or "background.<ext>")
+	Rotate          string  `json:"rotate"` // "conversation" = a random picture per conversation, "off" = fixed
+	Dim             float64 `json:"dim"`
+	Brightness      float64 `json:"brightness"`
+	ImageOpacity    float64 `json:"imageOpacity"`
+	ImageBlur       float64 `json:"imageBlur"`
+	Glass           float64 `json:"glass"`
+	Blur            float64 `json:"blur"`
+	TerminalOpacity float64 `json:"terminalOpacity"`
+	Position        string  `json:"position"`
+	Size            string  `json:"size"`
+	Mode            string  `json:"mode"` // "dark", "light" or "auto": exposed to the page as data-cb-mode
+	AutoClear       bool    `json:"autoClear"`
+	Refresh         int64   `json:"refresh,omitempty"` // bumped to ask the loader for a fresh report
 }
 
 func Defaults() Config {
 	return Config{
-		Enabled:   true,
-		Image:     "background.jpg",
-		Rotate:    "conversation",
-		Dim:       0.55,
-		Glass:     0.5,
-		Blur:      22,
-		ImageBlur: 6,
-		Position:  "center",
-		Size:      "cover",
-		Mode:      "dark",
-		AutoClear: true,
+		Enabled:         true,
+		Image:           "background.jpg",
+		Rotate:          "conversation",
+		Dim:             0.55,
+		Brightness:      1,
+		ImageOpacity:    1,
+		ImageBlur:       6,
+		Glass:           0.5,
+		Blur:            22,
+		TerminalOpacity: 0.82,
+		Position:        "center",
+		Size:            "cover",
+		Mode:            "dark",
+		AutoClear:       true,
 	}
 }
 
-// Rotating tells whether each conversation gets its own painting.
+// Rotating tells whether each conversation gets its own picture.
 func (c Config) Rotating() bool { return c.Rotate != "off" }
 
 var positionRE = regexp.MustCompile(`^[a-zA-Z0-9 .%-]{1,40}$`)
 
-// Clean brings every value back into the range the loader accepts.
+// Clean brings every value back into the range the loader accepts (the same
+// clamps as NUM in src/loader.js).
 func (c Config) Clean() Config {
 	d := Defaults()
 	clamp := func(v, lo, hi float64) float64 { return max(lo, min(hi, v)) }
 	c.Dim = clamp(c.Dim, 0, 0.95)
+	c.Brightness = clamp(c.Brightness, 0.3, 1.6)
+	c.ImageOpacity = clamp(c.ImageOpacity, 0.1, 1)
+	c.ImageBlur = clamp(c.ImageBlur, 0, 60)
 	c.Glass = clamp(c.Glass, 0, 1)
 	c.Blur = clamp(c.Blur, 0, 80)
-	c.ImageBlur = clamp(c.ImageBlur, 0, 60)
+	c.TerminalOpacity = clamp(c.TerminalOpacity, 0.3, 1)
 	if c.Rotate != "off" {
 		c.Rotate = "conversation"
 	}
@@ -158,23 +167,28 @@ func (c Config) Clean() Config {
 	return c
 }
 
+// readRaw reads config.json as loose JSON, or an empty map.
+func (b *Backdrop) readRaw() map[string]json.RawMessage {
+	raw := map[string]json.RawMessage{}
+	if data, err := os.ReadFile(b.path("config.json")); err == nil {
+		if json.Unmarshal(data, &raw) != nil || raw == nil {
+			raw = map[string]json.RawMessage{}
+		}
+	}
+	return raw
+}
+
 // ReadConfig reads config.json over the defaults. It is forgiving: a field
 // with the wrong type keeps its default instead of failing the whole file.
 func (b *Backdrop) ReadConfig() Config {
 	cfg := Defaults()
-	data, err := os.ReadFile(b.path("config.json"))
-	if err != nil {
-		return cfg
-	}
-	var raw map[string]json.RawMessage
-	if json.Unmarshal(data, &raw) != nil {
-		return cfg
-	}
+	raw := b.readRaw()
 	fields := map[string]any{
-		"enabled": &cfg.Enabled, "image": &cfg.Image, "imageSource": &cfg.ImageSource, "rotate": &cfg.Rotate,
-		"dim": &cfg.Dim, "glass": &cfg.Glass, "blur": &cfg.Blur, "imageBlur": &cfg.ImageBlur,
-		"position": &cfg.Position, "size": &cfg.Size, "mode": &cfg.Mode,
-		"autoClear": &cfg.AutoClear, "refresh": &cfg.Refresh,
+		"enabled": &cfg.Enabled, "image": &cfg.Image, "rotate": &cfg.Rotate,
+		"dim": &cfg.Dim, "brightness": &cfg.Brightness, "imageOpacity": &cfg.ImageOpacity,
+		"imageBlur": &cfg.ImageBlur, "glass": &cfg.Glass, "blur": &cfg.Blur,
+		"terminalOpacity": &cfg.TerminalOpacity, "position": &cfg.Position, "size": &cfg.Size,
+		"mode": &cfg.Mode, "autoClear": &cfg.AutoClear, "refresh": &cfg.Refresh,
 	}
 	for key, target := range fields {
 		if value, ok := raw[key]; ok {
@@ -184,12 +198,25 @@ func (b *Backdrop) ReadConfig() Config {
 	return cfg.Clean()
 }
 
-// WriteConfig saves config.json atomically; Claude picks it up within ~2 s.
+// WriteConfig saves config.json atomically, keeping the keys it does not know;
+// Claude picks it up within ~2 s.
 func (b *Backdrop) WriteConfig(cfg Config) error {
 	if err := os.MkdirAll(b.Dir, 0o700); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(cfg.Clean(), "", "  ")
+	known, err := json.Marshal(cfg.Clean())
+	if err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(known, &fields); err != nil {
+		return err
+	}
+	merged := b.readRaw()
+	for key, value := range fields {
+		merged[key] = value
+	}
+	data, err := json.MarshalIndent(merged, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -224,6 +251,9 @@ const customCSS = `/* Tes propres règles CSS pour Claude Desktop, rechargées e
  *
  *   Barre latérale opaque, sans verre :
  *     .dframe-sidebar { background-color: #141414 !important; backdrop-filter: none !important; }
+ *
+ *   Déplacer le bouton galerie (en haut à droite) :
+ *     #cb-gallery-btn { right: 200px !important; }
  *
  *   Un calque reste opaque ? « claude-backdrop status » le liste ; ajoute ici :
  *     .sa-classe { background: transparent !important; }
