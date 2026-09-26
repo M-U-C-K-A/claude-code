@@ -8,7 +8,9 @@ import os from "node:os";
 import path from "node:path";
 import { hasSips, toJpeg } from "./macos.mjs";
 
-const commons = (file, width = 1800) =>
+// The width must be one of Wikimedia's standard thumbnail steps (…, 1280, 1920,
+// 3840): since 2025 any other width is refused with HTTP 429.
+const commons = (file, width = 1920) =>
   `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(file)}?width=${width}`;
 
 // Built-in gallery. `mode` says which Claude appearance the painting suits:
@@ -28,7 +30,6 @@ export const GALLERY = [
     sources: [
       commons("David-Oath_of_the_Horatii-1784.jpg"),
       commons("Jacques-Louis_David_-_Oath_of_the_Horatii_-_Google_Art_Project.jpg"),
-      commons("Le_Serment_des_Horaces.jpg"),
     ],
   },
   {
@@ -36,9 +37,9 @@ export const GALLERY = [
     mode: "dark",
     title: "Pandemonium — John Martin, 1841",
     sources: [
-      commons("John_Martin_-_Pandemonium_-_WGA14140.jpg"),
-      commons("John_Martin_-_Pandemonium_-_Google_Art_Project.jpg"),
-      commons("Pandemonium-John_Martin.jpg"),
+      commons("John_Martin_-_Pandemonium_-_WGA14149.jpg"),
+      commons("John_Martin_Le_Pandemonium_Louvre.JPG"),
+      commons("John-Martin-Pandemonium-color-sharpend.jpg"),
     ],
   },
   {

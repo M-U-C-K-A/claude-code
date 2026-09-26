@@ -59,9 +59,15 @@
 /* ---------------------------------------------------------------- Ayu tokens */
 
 /* Remap Claude's semantic design tokens to Ayu Dark. Values are HSL triplets
- * (no hsl() wrapper): the app consumes them as hsl(var(--token)). These win in
- * the user origin, so they apply in both v1 and v2 colour systems, and whether
- * Claude itself is set to dark or light. */
+ * (no hsl() wrapper): the app consumes them as hsl(var(--token)).
+ *
+ * Every remap must be !important. This sheet is in the "user" origin, and a
+ * NORMAL user declaration loses to every author declaration: Claude defines
+ * these tokens on [data-theme="claude"][data-mode="dark"] (and the v2
+ * [data-color-version="v2"] variant), so without !important Claude keeps its
+ * own colours. An !important user declaration beats even the app's
+ * !important ones, whatever their specificity, so these apply in both v1 and
+ * v2 colour systems, and whether Claude itself is set to dark or light. */
 :root,
 body,
 [data-mode],
@@ -72,63 +78,65 @@ body,
 .darkTheme,
 .dark {
   /* text */
-  --text-000: 48 6% 73%;
-  --text-100: 48 6% 73%;
-  --text-200: 210 16% 71%;
-  --text-300: 210 16% 71%;
-  --text-400: 213 8% 57%;
-  --text-500: 213 8% 57%;
+  --text-000: 48 6% 73% !important;
+  --text-100: 48 6% 73% !important;
+  --text-200: 210 16% 71% !important;
+  --text-300: 210 16% 71% !important;
+  --text-400: 213 8% 57% !important;
+  --text-500: 213 8% 57% !important;
 
   /* brand = Ayu gold; blue accent for links; purple for Pro */
-  --accent-brand: 40 75% 61%;
-  --brand-000: 40 75% 55%;
-  --brand-100: 40 75% 61%;
-  --brand-200: 40 78% 66%;
-  --brand-900: 216 22% 9%;
-  --accent-000: 202 100% 67%;
-  --accent-100: 205 90% 62%;
-  --accent-200: 205 90% 62%;
-  --accent-900: 210 45% 22%;
-  --accent-pro-000: 270 100% 83%;
-  --accent-pro-100: 268 70% 68%;
-  --accent-pro-200: 268 60% 60%;
-  --accent-pro-900: 268 30% 22%;
-  --accent-hover: 40 78% 66%;
+  --accent-brand: 40 75% 61% !important;
+  --brand-000: 40 75% 55% !important;
+  --brand-100: 40 75% 61% !important;
+  --brand-200: 40 78% 66% !important;
+  --brand-900: 216 22% 9% !important;
+  --accent-000: 202 100% 67% !important;
+  --accent-100: 205 90% 62% !important;
+  --accent-200: 205 90% 62% !important;
+  --accent-900: 210 45% 22% !important;
+  --accent-pro-000: 270 100% 83% !important;
+  --accent-pro-100: 268 70% 68% !important;
+  --accent-pro-200: 268 60% 60% !important;
+  --accent-pro-900: 268 30% 22% !important;
+  --accent-hover: 40 78% 66% !important;
 
   /* surfaces used by popovers / menus / cards (main areas stay transparent) */
-  --bg-000: 216 20% 11%;
-  --bg-100: 218 24% 9%;
-  --bg-200: 219 26% 8%;
-  --bg-300: 220 28% 7%;
-  --bg-400: 220 30% 6%;
-  --bg-500: 220 30% 6%;
+  --bg-000: 216 20% 11% !important;
+  --bg-100: 218 24% 9% !important;
+  --bg-200: 219 26% 8% !important;
+  --bg-300: 220 28% 7% !important;
+  --bg-400: 220 30% 6% !important;
+  --bg-500: 220 30% 6% !important;
 
   /* borders: kept light-ish (dark borders get their subtlety from use-site alpha) */
-  --border-100: 214 14% 55%;
-  --border-200: 214 14% 55%;
-  --border-300: 214 12% 45%;
-  --border-400: 214 12% 45%;
+  --border-100: 214 14% 55% !important;
+  --border-200: 214 14% 55% !important;
+  --border-300: 214 12% 45% !important;
+  --border-400: 214 12% 45% !important;
 
   /* status */
-  --danger-000: 0 72% 68%;
-  --danger-100: 0 63% 60%;
-  --danger-200: 0 63% 60%;
-  --danger-900: 0 40% 20%;
-  --success-000: 80 70% 62%;
-  --success-100: 80 66% 57%;
-  --success-200: 80 66% 57%;
-  --success-900: 90 40% 16%;
-  --warning-000: 34 100% 66%;
-  --warning-100: 25 100% 63%;
-  --warning-200: 25 100% 63%;
-  --warning-900: 30 45% 18%;
+  --danger-000: 0 72% 68% !important;
+  --danger-100: 0 63% 60% !important;
+  --danger-200: 0 63% 60% !important;
+  --danger-900: 0 40% 20% !important;
+  --success-000: 80 70% 62% !important;
+  --success-100: 80 66% 57% !important;
+  --success-200: 80 66% 57% !important;
+  --success-900: 90 40% 16% !important;
+  --warning-000: 34 100% 66% !important;
+  --warning-100: 25 100% 63% !important;
+  --warning-200: 25 100% 63% !important;
+  --warning-900: 30 45% 18% !important;
 
   /* text/icons on a filled (gold/blue) button: dark, like Ayu */
-  --oncolor-100: 216 27% 8%;
-  --oncolor-200: 216 24% 10%;
-  --oncolor-300: 216 24% 10%;
+  --oncolor-100: 216 27% 8% !important;
+  --oncolor-200: 216 24% 10% !important;
+  --oncolor-300: 216 24% 10% !important;
 
-  --claude-accent-clay: var(--ayu-accent);
+  /* v2 colour system primitive the brand tokens were built from */
+  --_brand-clay: 40 75% 61% !important;
+  --claude-accent-clay: var(--ayu-accent) !important;
 }
 
 /* Console Design System (newer surfaces: popovers, the Cowork/code frame). */
@@ -151,6 +159,64 @@ body,
   --cds-text-danger: hsl(var(--danger-000)) !important;
   --cds-text-success: hsl(var(--success-000)) !important;
   --cds-text-warning: hsl(var(--warning-000)) !important;
+  --cds-text-pro: hsl(var(--accent-pro-000)) !important;
+
+  /* cards and panels a step above the page, popovers the lightest (the page
+   * itself, --cds-page-bg / --cds-surface-0, stays transparent below) */
+  --cds-surface-1: hsl(var(--bg-200)) !important;
+  --cds-surface-2: hsl(var(--bg-100)) !important;
+  --cds-surface-3: hsl(var(--bg-000)) !important;
+  --cds-surface-panel: hsl(var(--bg-100)) !important;
+  --cds-surface-popover: hsl(var(--bg-000)) !important;
+
+  /* Neutral ramp: pills, chips, segmented controls, sidebar row states. The
+   * page side climbs the Ayu surfaces, the text side the Ayu text; the alphas
+   * Claude derives from --cds-neutral-900 (borders, ghost fills) follow. */
+  --cds-neutral-0: hsl(var(--bg-300)) !important;
+  --cds-neutral-10: hsl(var(--bg-200)) !important;
+  --cds-neutral-20: hsl(var(--bg-200)) !important;
+  --cds-neutral-30: hsl(var(--bg-100)) !important;
+  --cds-neutral-40: hsl(var(--bg-100)) !important;
+  --cds-neutral-50: hsl(var(--bg-100)) !important;
+  --cds-neutral-60: hsl(var(--bg-100)) !important;
+  --cds-neutral-70: hsl(var(--bg-100)) !important;
+  --cds-neutral-80: hsl(var(--bg-000)) !important;
+  --cds-neutral-90: hsl(var(--bg-000)) !important;
+  --cds-neutral-100: hsl(var(--bg-000)) !important;
+  --cds-neutral-150: color-mix(in srgb, hsl(var(--bg-000)) 85%, hsl(var(--text-500))) !important;
+  --cds-neutral-200: color-mix(in srgb, hsl(var(--bg-000)) 70%, hsl(var(--text-500))) !important;
+  --cds-neutral-250: color-mix(in srgb, hsl(var(--bg-000)) 55%, hsl(var(--text-500))) !important;
+  --cds-neutral-300: color-mix(in srgb, hsl(var(--bg-000)) 40%, hsl(var(--text-500))) !important;
+  --cds-neutral-350: color-mix(in srgb, hsl(var(--bg-000)) 25%, hsl(var(--text-500))) !important;
+  --cds-neutral-400: color-mix(in srgb, hsl(var(--bg-000)) 12%, hsl(var(--text-500))) !important;
+  --cds-neutral-450: hsl(var(--text-500)) !important;
+  --cds-neutral-500: hsl(var(--text-500)) !important;
+  --cds-neutral-550: color-mix(in srgb, hsl(var(--text-500)) 65%, hsl(var(--text-300))) !important;
+  --cds-neutral-600: color-mix(in srgb, hsl(var(--text-500)) 40%, hsl(var(--text-300))) !important;
+  --cds-neutral-650: color-mix(in srgb, hsl(var(--text-500)) 20%, hsl(var(--text-300))) !important;
+  --cds-neutral-700: hsl(var(--text-300)) !important;
+  --cds-neutral-750: color-mix(in srgb, hsl(var(--text-300)) 60%, hsl(var(--text-000))) !important;
+  --cds-neutral-800: color-mix(in srgb, hsl(var(--text-300)) 30%, hsl(var(--text-000))) !important;
+  --cds-neutral-900: hsl(var(--text-000)) !important;
+
+  /* filled buttons and tinted backgrounds */
+  --cds-fill-primary: hsl(var(--text-000)) !important;
+  --cds-fill-primary-hover: hsl(var(--text-200)) !important;
+  --cds-on-primary: hsl(var(--bg-000)) !important;
+  --cds-fill-pro: hsl(var(--accent-pro-100)) !important;
+  --cds-fill-danger: hsl(var(--danger-100)) !important;
+  --cds-fill-success: hsl(var(--success-100)) !important;
+  --cds-on-accent: hsl(var(--oncolor-100)) !important;
+  --cds-on-brand: hsl(var(--oncolor-100)) !important;
+  --cds-on-danger: hsl(var(--oncolor-100)) !important;
+  --cds-on-pro: hsl(var(--oncolor-100)) !important;
+  --cds-on-success: hsl(var(--oncolor-100)) !important;
+  --cds-bg-accent: hsl(var(--accent-900)) !important;
+  --cds-bg-pro: hsl(var(--accent-pro-900)) !important;
+  --cds-bg-danger: hsl(var(--danger-900)) !important;
+  --cds-bg-success: hsl(var(--success-900)) !important;
+  --cds-bg-warning: hsl(var(--warning-900)) !important;
+  --cds-border-accent: hsl(var(--accent-100) / 0.5) !important;
 }
 
 /* Claude Code (Epitaxy) view keeps its palette on .epitaxy-root. */
