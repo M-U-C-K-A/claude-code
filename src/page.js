@@ -101,18 +101,35 @@ const hash = (str) => {
 };
 const galleryList = () => (Array.isArray(CB.gallery) ? CB.gallery : []);
 
+// All backgrounds the panel can show, de-duplicated by id and by url. The fixed
+// image (rotation off, or a custom "default") is included once.
+function items() {
+  const out = [];
+  const ids = new Set();
+  const urls = new Set();
+  for (const g of galleryList()) {
+    if (!g || ids.has(g.id) || urls.has(g.url)) continue;
+    ids.add(g.id);
+    urls.add(g.url);
+    out.push({ id: g.id, url: g.url, file: g.file, custom: /^custom-/.test(g.id) });
+  }
+  if (CB.fixed && !urls.has(CB.fixed)) out.unshift({ id: "fixed", url: CB.fixed, fixed: true });
+  return out;
+}
+
 function pickUrl() {
-  // A choice made in the panel wins, and sticks for this conversation.
+  // A choice made in the panel wins, and sticks for this conversation. Stored as
+  // a small id (a data: URL would blow the sessionStorage quota).
   try {
-    const chosenUrl = sessionStorage.getItem("cb-pick-url");
-    if (chosenUrl) return { id: "choisi", url: chosenUrl };
+    const id = sessionStorage.getItem("cb-pick-id");
+    if (id) {
+      const found = items().find((i) => i.id === id);
+      if (found) return { id: found.id, url: found.url };
+    }
   } catch {}
-  const gallery = galleryList();
-  if (CB.rotate !== "off" && gallery.length) {
-    const mode = detectMode();
-    let pool = gallery.filter((g) => g.mode === mode);
-    if (!pool.length) pool = gallery;
-    const pick = pool[hash(`${seed()}:${mode}`) % pool.length];
+  const pool = items();
+  if (CB.rotate !== "off" && pool.length) {
+    const pick = pool[hash(seed()) % pool.length];
     return { id: pick.id, url: pick.url };
   }
   return { id: CB.fixed ? "fixed" : "none", url: CB.fixed || "" };
@@ -350,22 +367,18 @@ function sendCmd(cmd) {
   } catch {}
 }
 
-// Everything the panel can show: the gallery + the fixed image, de-duplicated.
-function items() {
-  const list = galleryList().map((g) => ({ id: g.id, url: g.url, file: g.file, mode: g.mode, custom: /^custom-/.test(g.id) }));
-  if (CB.fixed && !list.some((i) => i.url === CB.fixed)) list.unshift({ id: "fixed", url: CB.fixed, fixed: true });
-  return list;
-}
-
 function currentUrl() {
   return chosen.url || "";
 }
 
-function pickHere(url) {
+// Show a background in this window and remember the choice for the conversation
+// (by small id, not the data URL).
+function pickHere(url, id) {
   try {
-    sessionStorage.setItem("cb-pick-url", url);
+    if (id) sessionStorage.setItem("cb-pick-id", id);
+    else sessionStorage.removeItem("cb-pick-id");
   } catch {}
-  showImage(url, "choisi").then(renderGrid);
+  showImage(url, id || "choisi").then(renderGrid);
 }
 
 let gridEl = null;
@@ -377,8 +390,8 @@ function renderGrid() {
     const cell = el("div", { className: "cb-thumb" });
     if (it.url === cur) cell.classList.add("cb-current");
     cell.style.backgroundImage = `url("${it.url}")`;
-    cell.title = it.fixed ? "Image fixe" : it.custom ? "Ajoutée" : it.id;
-    cell.onclick = () => pickHere(it.url);
+    cell.title = it.fixed ? "Image par défaut" : it.custom ? "Ajoutée" : it.id;
+    cell.onclick = () => pickHere(it.url, it.id);
     if (it.custom && it.file) {
       const del = el("button", { className: "cb-del", type: "button", title: "Retirer" });
       del.appendChild(svg(["M6 6l12 12M18 6L6 18"], 12));
@@ -403,14 +416,32 @@ function renderGrid() {
     reader.onload = () => {
       const url = String(reader.result || "");
       if (!url.startsWith("data:image/")) return;
-      sendCmd({ action: "add", name: f.name, dataUrl: url, mode: detectMode() });
-      pickHere(url);
+      const id = `custom-${Date.now().toString(36)}`;
+      sendCmd({ action: "add", id, name: f.name, dataUrl: url });
+      pickHere(url, id); // shows it now; survives the loader's re-inject via the id
     };
     reader.readAsDataURL(f);
   };
   add.appendChild(input);
   gridEl.appendChild(add);
 }
+
+// A labelled slider that live-updates a CSS var and persists via the loader.
+function slider(label, key, cssVar, min, max, step, value, format) {
+  const row = el("label", { className: "cb-slider" });
+  const top = el("div", { className: "cb-slider-top" });
+  const out = el("span", { className: "cb-slider-val", textContent: format(value) });
+  top.append(el("span", { textContent: label }), out);
+  const input = el("input", { type: "range", min, max, step, value });
+  input.oninput = () => {
+    root.style.setProperty(cssVar, input.value);
+    out.textContent = format(Number(input.value));
+  };
+  input.onchange = () => sendCmd({ action: "set", key, value: Number(input.value) });
+  row.append(top, input);
+  return row;
+}
+const pct = (v) => `${Math.round(v * 100)}%`;
 
 function buildUI() {
   if (document.getElementById(UI_ID) || !document.body) return;
@@ -424,10 +455,16 @@ function buildUI() {
   head.appendChild(el("span", { textContent: "Fonds d'écran" }));
   const close = el("button", { className: "cb-x", type: "button", title: "Fermer" });
   close.appendChild(svg(["M6 6l12 12M18 6L6 18"], 14));
-  close.onclick = () => (panel.hidden = true);
   head.appendChild(close);
 
   gridEl = el("div", { className: "cb-grid" });
+
+  const settings = (CB.settings && typeof CB.settings === "object") ? CB.settings : {};
+  const sliders = el("div", { className: "cb-sliders" });
+  sliders.append(
+    slider("Opacité", "imageOpacity", "--cb-image-opacity", 0.1, 1, 0.05, settings.imageOpacity ?? 1, pct),
+    slider("Luminosité", "brightness", "--cb-brightness", 0.3, 1.6, 0.05, settings.brightness ?? 1, pct),
+  );
 
   const foot = el("div", { className: "cb-foot" });
   const rot = el("label", { className: "cb-rotate" });
@@ -437,7 +474,7 @@ function buildUI() {
     sendCmd({ action: "rotate", value: check.checked ? "on" : "off" });
     if (check.checked) {
       try {
-        sessionStorage.removeItem("cb-pick-url");
+        sessionStorage.removeItem("cb-pick-id");
       } catch {}
     }
   };
@@ -450,13 +487,26 @@ function buildUI() {
   };
   foot.append(rot, def);
 
-  panel.append(head, gridEl, foot);
-  btn.onclick = () => {
-    panel.hidden = !panel.hidden;
-    if (!panel.hidden) renderGrid();
+  panel.append(head, gridEl, sliders, foot);
+  const setOpen = (open) => {
+    panel.hidden = !open;
+    try {
+      if (open) sessionStorage.setItem("cb-panel-open", "1");
+      else sessionStorage.removeItem("cb-panel-open");
+    } catch {}
+    if (open) renderGrid();
   };
+  close.onclick = () => setOpen(false);
+  btn.onclick = () => setOpen(panel.hidden);
   wrap.append(btn, panel);
   document.body.appendChild(wrap);
+  // Keep the panel open across the loader's live re-injections (slider drags,
+  // toggles and additions all re-apply the page script).
+  let stayOpen = false;
+  try {
+    stayOpen = sessionStorage.getItem("cb-panel-open") === "1";
+  } catch {}
+  if (stayOpen) setOpen(true);
 }
 
 // ---------------------------------------------------------------- lifecycle

@@ -82,9 +82,9 @@ Pour partir d'une autre image tout de suite :
 ### Galerie et image par conversation
 
 Par défaut, **chaque conversation reçoit un tableau au hasard**, stable pour
-cette conversation (un rechargement garde le même). Les tableaux sont choisis
-selon le mode : en **sombre**, *La Mort de Socrate*, *Le Serment des Horaces* ou
-*Pandemonium* ; en **clair**, *L'École d'Athènes*. Tous sont du domaine public.
+cette conversation (un rechargement garde le même), tiré parmi *La Mort de
+Socrate*, *Le Serment des Horaces*, *Pandemonium* et *L'École d'Athènes* — tous
+du domaine public.
 
 ```bash
 ./claude-backdrop gallery         # liste et télécharge les tableaux, active la rotation
@@ -101,6 +101,7 @@ où tu peux, sans passer par le terminal :
 
 - voir les fonds disponibles et **changer celui de la fenêtre** d'un clic ;
 - **ajouter ta propre image** (bouton ＋, elle rejoint la galerie) ;
+- régler l'**opacité** et la **luminosité** de l'image avec deux curseurs ;
 - activer/couper l'**image au hasard par conversation** ;
 - **Définir par défaut** l'image affichée (pour toutes les fenêtres).
 
@@ -143,7 +144,9 @@ depuis [claude.ai/download](https://claude.ai/download).
 | Réglage     | Défaut          | Rôle |
 |-------------|-----------------|------|
 | `rotate`    | `conversation`  | `on` = une image au hasard par conversation ; `off` = image fixe |
-| `dim`       | `0.55`          | assombrissement de l'image (0 à 0.95) |
+| `dim`       | `0.55`          | assombrissement (voile) de l'image (0 à 0.95) |
+| `imageopacity` | `1`          | opacité de l'image de fond (0.1 à 1) — curseur dans le panneau |
+| `brightness`   | `1`          | luminosité de l'image de fond (0.3 à 1.6) — curseur dans le panneau |
 | `imageblur` | `6`             | flou de l'image de fond en px (0 à 60) |
 | `glass`     | `0.5`           | opacité du verre (barre latérale, panneaux, terminal), 0 à 1 |
 | `blur`      | `22`            | flou du verre en px (0 = sans flou) |

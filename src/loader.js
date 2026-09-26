@@ -88,24 +88,39 @@
 
     function gallery() {
       const out = [];
+      const seen = new Set();
       for (const entry of readManifest()) {
+        if (!entry || !entry.id || seen.has(entry.id)) continue;
         const fileName = typeof entry.file === "string" ? entry.file : `${entry.id}.jpg`;
         const url = dataUrl(file(path.join("gallery", fileName)));
-        if (url) out.push({ id: entry.id, mode: entry.mode === "light" ? "light" : "dark", file: fileName, url });
+        if (!url) continue;
+        seen.add(entry.id);
+        out.push({ id: entry.id, title: entry.title || entry.id, file: fileName, url });
       }
       return out;
     }
 
+    // Live-tunable style tokens, from config (with defaults + clamps).
+    const NUM = {
+      dim: [0.55, 0, 0.95],
+      glass: [0.5, 0, 1],
+      blur: [22, 0, 80],
+      imageBlur: [6, 0, 60],
+      brightness: [1, 0.3, 1.6],
+      imageOpacity: [1, 0.1, 1],
+      terminalOpacity: [0.82, 0.3, 1],
+    };
+    const num = (cfg, key) => clamp(cfg[key], NUM[key][0], NUM[key][1], NUM[key][2]);
+
     function stableTokens(cfg) {
-      const dim = clamp(cfg.dim, 0.55, 0, 0.95);
-      const glass = clamp(cfg.glass, 0.5, 0, 1);
-      const blur = clamp(cfg.blur, 22, 0, 80);
-      const imageBlur = clamp(cfg.imageBlur, 6, 0, 60);
-      const termOpacity = clamp(cfg.terminalOpacity, 0.82, 0.3, 1);
       const position = typeof cfg.position === "string" && /^[a-z0-9 .%-]{1,40}$/i.test(cfg.position) ? cfg.position : "center";
       const size = typeof cfg.size === "string" && /^(cover|contain|auto|\d{1,4}(\.\d+)?(px|%))$/.test(cfg.size) ? cfg.size : "cover";
-      let css = `:root{--cb-dim:${dim};--cb-glass:${glass};--cb-blur:${blur}px;--cb-image-blur:${imageBlur}px;--cb-term-opacity:${termOpacity};--cb-position:${position};--cb-size:${size}}`;
-      if (blur === 0) css += "\n.dframe-sidebar,[data-cb-glass]{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}";
+      let css =
+        `:root{--cb-dim:${num(cfg, "dim")};--cb-glass:${num(cfg, "glass")};--cb-blur:${num(cfg, "blur")}px;` +
+        `--cb-image-blur:${num(cfg, "imageBlur")}px;--cb-image-opacity:${num(cfg, "imageOpacity")};` +
+        `--cb-brightness:${num(cfg, "brightness")};--cb-term-opacity:${num(cfg, "terminalOpacity")};` +
+        `--cb-position:${position};--cb-size:${size}}`;
+      if (num(cfg, "blur") === 0) css += "\n.dframe-sidebar,[data-cb-glass]{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}";
       return css;
     }
 
@@ -135,16 +150,18 @@
       if (!cmd || typeof cmd !== "object") return;
       if (cmd.action === "rotate") {
         writeConfigPatch({ rotate: cmd.value === "off" ? "off" : "conversation" });
+      } else if (cmd.action === "set" && typeof cmd.key === "string" && NUM[cmd.key]) {
+        writeConfigPatch({ [cmd.key]: clamp(cmd.value, NUM[cmd.key][0], NUM[cmd.key][1], NUM[cmd.key][2]) });
       } else if (cmd.action === "add" && typeof cmd.dataUrl === "string") {
         const decoded = decodeDataUrl(cmd.dataUrl);
         if (!decoded) return;
         const galleryDir = file("gallery");
         fs.mkdirSync(galleryDir, { recursive: true });
-        const id = `custom-${slug(cmd.name)}-${Date.now().toString(36)}`;
+        const id = /^custom-[a-z0-9-]{1,48}$/.test(cmd.id || "") ? cmd.id : `custom-${slug(cmd.name)}-${Date.now().toString(36)}`;
         const fileName = `${id}${decoded.ext}`;
         fs.writeFileSync(path.join(galleryDir, fileName), decoded.bytes);
-        const manifest = readManifest();
-        manifest.push({ id, mode: cmd.mode === "light" ? "light" : "dark", title: cmd.name || id, file: fileName, custom: true });
+        const manifest = readManifest().filter((e) => e.id !== id);
+        manifest.push({ id, title: cmd.name || id, file: fileName, custom: true });
         fs.writeFileSync(path.join(galleryDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
         writeConfigPatch({ rotate: "conversation" });
       } else if (cmd.action === "delete" && typeof cmd.file === "string") {
@@ -234,6 +251,7 @@
           rotate,
           fixed,
           gallery: gal,
+          settings: { imageOpacity: num(cfg, "imageOpacity"), brightness: num(cfg, "brightness") },
         };
         css = `${readText(file("theme.css"))}\n${stableTokens(cfg)}\n${readText(file("custom.css"))}`;
       }

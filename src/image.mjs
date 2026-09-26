@@ -11,19 +11,16 @@ import { hasSips, toJpeg } from "./macos.mjs";
 const commons = (file, width = 1800) =>
   `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(file)}?width=${width}`;
 
-// Built-in gallery. `mode` says which Claude appearance the painting suits:
-// the dark, dramatic ones for dark mode; the bright fresco for light mode.
-// Several sources per entry: the first that downloads wins.
+// Built-in gallery of public-domain paintings. Several sources per entry: the
+// first that downloads wins.
 export const GALLERY = [
   {
     id: "socrates",
-    mode: "dark",
     title: "La Mort de Socrate — Jacques-Louis David, 1787",
     sources: [commons("David - The Death of Socrates.jpg"), "met:436105"],
   },
   {
     id: "horatii",
-    mode: "dark",
     title: "Le Serment des Horaces — Jacques-Louis David, 1784",
     sources: [
       commons("David-Oath_of_the_Horatii-1784.jpg"),
@@ -33,21 +30,20 @@ export const GALLERY = [
   },
   {
     id: "pandemonium",
-    mode: "dark",
     title: "Pandemonium — John Martin, 1841",
     sources: [
-      commons("John_Martin_-_Pandemonium_-_WGA14140.jpg"),
       commons("John_Martin_-_Pandemonium_-_Google_Art_Project.jpg"),
-      commons("Pandemonium-John_Martin.jpg"),
+      commons("John_Martin_-_Pandemonium_-_WGA14140.jpg"),
+      commons("Pandemonium%2C_John_Martin.jpg"),
+      commons("John Martin - Pandemonium - WGA14140.jpg"),
     ],
   },
   {
     id: "school-of-athens",
-    mode: "light",
     title: "L'École d'Athènes — Raphaël, 1511",
     sources: [
-      commons('"The_School_of_Athens"_by_Raffaello_Sanzio_da_Urbino.jpg'),
       commons("Raphael_School_of_Athens.jpg"),
+      commons('"The_School_of_Athens"_by_Raffaello_Sanzio_da_Urbino.jpg'),
     ],
   },
 ];

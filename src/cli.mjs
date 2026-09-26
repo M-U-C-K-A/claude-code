@@ -26,6 +26,8 @@ const DEFAULTS = {
   glass: 0.5,
   blur: 22,
   imageBlur: 6,
+  imageOpacity: 1,
+  brightness: 1,
   terminalOpacity: 0.82,
   position: "center",
   size: "cover",
@@ -470,8 +472,7 @@ async function cmdGallery(opts) {
   say(bold("Galerie de tableaux") + dim("  (une image au hasard par conversation)"));
   for (const entry of GALLERY) {
     const present = fs.existsSync(path.join(SUPPORT, "gallery", `${entry.id}.jpg`));
-    const tag = entry.mode === "light" ? yellow("clair") : dim("sombre");
-    say(`  ${present ? green("●") : dim("○")} ${entry.id.padEnd(16)} ${tag}  ${dim(entry.title)}`);
+    say(`  ${present ? green("●") : dim("○")} ${entry.id.padEnd(16)} ${dim(entry.title)}`);
   }
   if (sub === "list") return;
   if (sub && sub !== "sync") fail("Usage : claude-backdrop gallery [sync]");
@@ -487,7 +488,9 @@ const SETTINGS = {
     help: "on = une image au hasard par conversation ; off = image fixe",
     parse: (v) => ({ on: "conversation", conversation: "conversation", off: "off", fixe: "off" })[v] ?? null,
   },
-  dim: { help: "assombrissement de l'image, 0 à 0.95", parse: (v) => number(v, 0, 0.95) },
+  dim: { help: "assombrissement (voile) de l'image, 0 à 0.95", parse: (v) => number(v, 0, 0.95) },
+  imageopacity: { help: "opacité de l'image de fond, 0.1 à 1", parse: (v) => number(v, 0.1, 1), key: "imageOpacity" },
+  brightness: { help: "luminosité de l'image de fond, 0.3 à 1.6", parse: (v) => number(v, 0.3, 1.6) },
   imageblur: { help: "flou de l'image de fond en px, 0 à 60", parse: (v) => number(v, 0, 60), key: "imageBlur" },
   glass: { help: "opacité du verre (barre latérale, panneaux, terminal), 0 à 1", parse: (v) => number(v, 0, 1) },
   blur: { help: "flou du verre en px, 0 à 80 (0 = sans flou)", parse: (v) => number(v, 0, 80) },
