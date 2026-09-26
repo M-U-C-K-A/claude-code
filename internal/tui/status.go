@@ -129,7 +129,11 @@ func StatusReport(st *backdrop.Status) string {
 			}
 			line += sMuted.Render("  image ") + image
 			if p.Painting != "" && p.Painting != "none" {
-				line += sMuted.Render(" [" + p.Painting + "]")
+				size := "aperçu"
+				if p.Full {
+					size = "pleine résolution"
+				}
+				line += sMuted.Render(" [" + p.Painting + ", " + size + "]")
 			}
 			add(line)
 			add("    " + sMuted.Render(fmt.Sprintf("%d calques transparents · %d en verre · %d terminaux", p.Cleared, p.Glass, p.Terminals)))

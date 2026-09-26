@@ -11,7 +11,7 @@
 ;(function claudeBackdropLoader() {
   "use strict";
   try {
-    const { app, webContents } = require("electron");
+    const { app, nativeImage, webContents } = require("electron");
     const fs = require("fs");
     const os = require("os");
     const path = require("path");
@@ -87,18 +87,69 @@
       }
     }
 
+    // Pictures are big (up to 4K): the page gets a small preview of each, for
+    // the panel and to paint something right away, and only the picture on
+    // screen is sent in full afterwards (sendFull). Previews are cached by file.
+    const PREVIEW_WIDTH = 640;
+    const previews = new Map(); // path -> { key, url }
+    function previewUrl(p) {
+      const key = stamp(p);
+      const hit = previews.get(p);
+      if (hit && hit.key === key) return hit.url;
+      let url = "";
+      try {
+        const img = nativeImage.createFromPath(p);
+        if (!img.isEmpty()) {
+          const small = img.getSize().width > PREVIEW_WIDTH ? img.resize({ width: PREVIEW_WIDTH, quality: "good" }) : img;
+          url = `data:image/jpeg;base64,${small.toJPEG(82).toString("base64")}`;
+        }
+      } catch {}
+      if (!url) url = dataUrl(p); // a format nativeImage can't read: send it as is
+      previews.set(p, { key, url });
+      return url;
+    }
+
+    const galleryFile = (entry) => file(path.join("gallery", path.basename(typeof entry.file === "string" ? entry.file : `${entry.id}.jpg`)));
+
     function gallery() {
       const out = [];
       const seen = new Set();
       for (const entry of readManifest()) {
         if (!entry || !entry.id || seen.has(entry.id)) continue;
-        const fileName = typeof entry.file === "string" ? entry.file : `${entry.id}.jpg`;
-        const url = dataUrl(file(path.join("gallery", fileName)));
+        const p = galleryFile(entry);
+        if (!fs.existsSync(p)) continue;
+        const url = previewUrl(p);
         if (!url) continue;
         seen.add(entry.id);
-        out.push({ id: entry.id, title: entry.title || entry.id, file: fileName, url });
+        out.push({ id: entry.id, title: entry.title || entry.id, file: path.basename(p), url });
       }
       return out;
+    }
+
+    // The full-size file behind a picture id ("fixed" is config.image).
+    function fullFile(id) {
+      if (id === "fixed") return imagePath(readConfig());
+      const entry = readManifest().find((e) => e && e.id === id);
+      return entry ? galleryFile(entry) : "";
+    }
+
+    // Send the full-size picture to a page, which swaps it for the preview.
+    // Resolves to the page's new status (null if nothing was sent).
+    async function sendFull(wc, id) {
+      if (!id || typeof id !== "string" || wc.isDestroyed()) return null;
+      const p = fullFile(id);
+      const url = p ? dataUrl(p) : "";
+      if (!url) return null;
+      const status = await wc.executeJavaScript(
+        `(()=>{const a=window.__claudeBackdrop;return a&&a.setFull?a.setFull(${JSON.stringify(id)},${JSON.stringify(url)}).then(()=>a.status()):null})()`,
+        true,
+      );
+      const a = applied.get(wc.id);
+      if (a && status) {
+        a.page = status;
+        scheduleStatus();
+      }
+      return status;
     }
 
     // Live-tunable style tokens, from config (with defaults + clamps).
@@ -166,10 +217,16 @@
         fs.writeFileSync(path.join(galleryDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
         writeConfigPatch({ rotate: "conversation" });
       } else if (cmd.action === "delete" && typeof cmd.file === "string") {
-        const target = path.join(file("gallery"), path.basename(cmd.file));
-        fs.rmSync(target, { force: true });
-        const manifest = readManifest().filter((e) => (e.file || `${e.id}.jpg`) !== path.basename(cmd.file));
+        const name = path.basename(cmd.file);
+        fs.rmSync(path.join(file("gallery"), name), { force: true });
+        const manifest = readManifest().filter((e) => (e.file || `${e.id}.jpg`) !== name);
         fs.writeFileSync(file(path.join("gallery", "manifest.json")), `${JSON.stringify(manifest, null, 2)}\n`);
+        // It was the fixed picture: back to the random pick.
+        if (readConfig().image === `gallery/${name}`) writeConfigPatch({ rotate: "conversation" });
+      } else if (cmd.action === "default" && typeof cmd.id === "string" && (cmd.id === "fixed" || readManifest().some((e) => e && e.id === cmd.id))) {
+        // A picture of the gallery: point at its full-size file.
+        const entry = readManifest().find((e) => e && e.id === cmd.id);
+        writeConfigPatch(entry ? { image: `gallery/${path.basename(galleryFile(entry))}`, rotate: "off" } : { rotate: "off" });
       } else if (cmd.action === "default" && typeof cmd.dataUrl === "string") {
         const decoded = decodeDataUrl(cmd.dataUrl);
         if (!decoded) return;
@@ -182,19 +239,25 @@
 
     let lastCmdTs = 0;
     async function pollCommands() {
-      const reader = "(()=>{try{var v=localStorage.getItem('cb-cmd');if(v)localStorage.removeItem('cb-cmd');return v}catch(e){return null}})()";
+      // cb-cmd (localStorage, shared by the windows) carries panel commands; a
+      // window asks for the full-size picture it just switched to through
+      // window.__claudeBackdrop.want (its own).
+      const reader =
+        "(()=>{var r={};try{var v=localStorage.getItem('cb-cmd');if(v)localStorage.removeItem('cb-cmd');r.cmd=v}catch(e){}" +
+        "try{var a=window.__claudeBackdrop;if(a&&a.want){r.want=a.want;a.want=null}}catch(e){}return JSON.stringify(r)})()";
       for (const wc of webContents.getAllWebContents()) {
         if (wc.isDestroyed() || !isTarget(wc.getURL())) continue;
-        let raw;
+        let got;
         try {
-          raw = await wc.executeJavaScript(reader, true);
+          got = JSON.parse(await wc.executeJavaScript(reader, true));
         } catch {
           continue;
         }
-        if (!raw) continue;
+        if (got.want) sendFull(wc, got.want).catch(log);
+        if (!got.cmd) continue;
         let cmd;
         try {
-          cmd = JSON.parse(raw);
+          cmd = JSON.parse(got.cmd);
         } catch {
           continue;
         }
@@ -230,7 +293,7 @@
       let image = "off";
       let page = { version: VERSION };
       if (enabled) {
-        const fixed = dataUrl(picture);
+        const fixed = fs.existsSync(picture) && fs.statSync(picture).size <= MAX_IMAGE_BYTES ? previewUrl(picture) : "";
         const rotate = cfg.rotate === "off" ? "off" : "conversation";
         // The gallery ships even with a fixed image: the panel lists it, and a
         // window can still switch to another picture.
@@ -285,6 +348,13 @@
           ? `(async()=>{const CB=${JSON.stringify(b.page)};\n${PAGE_SCRIPT}\n})()`
           : "(()=>{try{window.__claudeBackdrop&&window.__claudeBackdrop.dispose()}catch(e){}return null})()";
         current.page = await wc.executeJavaScript(js, true);
+        // The page shows a preview: follow up with the full-size picture,
+        // unless it kept it from a previous run.
+        const shown = current.page && current.page.painting;
+        if (shown && shown !== "none" && !current.page.full) {
+          const after = await sendFull(wc, shown);
+          if (after) current.page = after;
+        }
       } catch (e) {
         current.error = String((e && e.message) || e);
       }

@@ -77,6 +77,18 @@ func TestGalleryPanelRulesAreImportant(t *testing.T) {
 	}
 }
 
+// Chromium drops a custom property over 2 MB: a 4K picture as a data: URL
+// must never go through the --cb-image variable (it silently kept the old
+// picture), but through the page script's own stylesheet.
+func TestPicturesDoNotGoThroughACSSVariable(t *testing.T) {
+	if strings.Contains(PageScript, `setProperty("--cb-image"`) {
+		t.Fatal("page.js sets --cb-image: large pictures would be dropped")
+	}
+	if !strings.Contains(PageScript, "adoptedStyleSheets") {
+		t.Fatal("page.js should paint the picture with its own stylesheet")
+	}
+}
+
 func TestThemeIsWellFormed(t *testing.T) {
 	if strings.Count(ThemeCSS, "{") != strings.Count(ThemeCSS, "}") {
 		t.Fatal("unbalanced braces in theme.css")

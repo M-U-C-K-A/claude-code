@@ -11,6 +11,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"net/http"
 	"net/url"
@@ -43,26 +46,28 @@ func (p Painting) Label() string {
 	return fmt.Sprintf("%s — %s, %d", p.Title, p.Artist, p.Year)
 }
 
-// Gallery lists the built-in paintings. File names checked against Commons;
-// the search is a last resort should a file be renamed.
+// Gallery lists the built-in paintings, the largest good scan first (sizes of
+// the originals on Commons). The search is a last resort should a file be
+// renamed.
 var Gallery = []Painting{
 	{
 		ID: "socrates", Title: "La Mort de Socrate", Artist: "Jacques-Louis David", Year: 1787,
-		Sources: []string{"commons:David - The Death of Socrates.jpg", "met:436105"},
+		Sources: []string{"commons:David - The Death of Socrates.jpg", "met:436105"}, // 3896 px
 	},
 	{
 		ID: "horatii", Title: "Le Serment des Horaces", Artist: "Jacques-Louis David", Year: 1784,
 		Sources: []string{
+			"commons:Jacques-Louis David - Oath of the Horatii - Google Art Project.jpg", // 6156 px
 			"commons:David-Oath of the Horatii-1784.jpg",
-			"commons:Jacques-Louis David - Oath of the Horatii - Google Art Project.jpg",
 			"search:Jacques-Louis David Oath of the Horatii",
 		},
 	},
 	{
+		// No 4K scan on Commons: the Louvre's own photograph is the largest.
 		ID: "pandemonium", Title: "Pandémonium", Artist: "John Martin", Year: 1841,
 		Sources: []string{
-			"commons:John Martin - Pandemonium - WGA14149.jpg",
-			"commons:John Martin Le Pandemonium Louvre.JPG",
+			"commons:Le Pandemonium - John Martin - Musée du Louvre Peintures RF 2006 21.jpg", // 2843 px
+			"commons:Le Pandemonium - John Martin - Musée du Louvre Peintures RF 2006 21 - sans cadre.jpg",
 			"commons:John-Martin-Pandemonium-color-sharpend.jpg",
 			"search:John Martin Pandemonium 1841",
 		},
@@ -70,7 +75,7 @@ var Gallery = []Painting{
 	{
 		ID: "school-of-athens", Title: "L'École d'Athènes", Artist: "Raphaël", Year: 1511,
 		Sources: []string{
-			`commons:"The School of Athens" by Raffaello Sanzio da Urbino.jpg`,
+			`commons:"The School of Athens" by Raffaello Sanzio da Urbino.jpg`, // 3820 px
 			"commons:Raphael School of Athens.jpg",
 			"search:Raphael School of Athens Stanza",
 		},
@@ -226,14 +231,20 @@ func (b *Backdrop) PictureSummary(cfg Config) string {
 // ---------------------------------------------------------------- downloads
 
 // commonsWidth must be one of Wikimedia's standard thumbnail steps (…, 1280,
-// 1920, 3840): since 2025 any other width is refused with HTTP 429.
-const commonsWidth = 1920
+// 1920, 3840): since 2025 any other width is refused with HTTP 429. 3840 is
+// 4K; a smaller original comes as is.
+const commonsWidth = 3840
 
 const (
-	userAgent      = "claude-backdrop/" + Version + " (https://github.com/M-U-C-K-A/claude-code)"
-	maxDownload    = 40 << 20
-	maxRawBytes    = 16 << 20 // without sips, the picture is used as is (the loader's limit)
-	galleryMaxSide = 1600     // every gallery picture ships to each page
+	userAgent   = "claude-backdrop/" + Version + " (https://github.com/M-U-C-K-A/claude-code)"
+	maxDownload = 40 << 20
+	maxRawBytes = 16 << 20 // without sips, the picture is used as is (the loader's limit)
+	// Pictures are stored in 4K: the loader sends the page a small preview of
+	// each and only the one on screen in full.
+	galleryMaxSide = 3840
+	// A built-in painting smaller than this was stored by an older release
+	// (1600 px) and is downloaded again.
+	lowResSide = 2000
 )
 
 var client = &http.Client{Timeout: 90 * time.Second}
@@ -524,12 +535,31 @@ func slug(s string) string {
 	return s
 }
 
-// ensurePainting downloads a built-in painting into the gallery if needed.
+// longSide is the longest side of a picture in pixels, 0 if unreadable.
+func longSide(file string) int {
+	f, err := os.Open(file)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	cfg, _, err := image.DecodeConfig(f)
+	if err != nil {
+		return 0
+	}
+	return max(cfg.Width, cfg.Height)
+}
+
+// ensurePainting downloads a built-in painting into the gallery if it is
+// missing, or stored in an older, smaller size. On failure the old file stays.
 func (b *Backdrop) ensurePainting(p Painting, r Reporter) error {
 	if b.HasPainting(p.ID) {
-		return nil
+		if side := longSide(b.PaintingFile(p.ID)); side == 0 || side >= lowResSide {
+			return nil
+		}
+		r.Step("Téléchargement en haute définition : " + p.Label())
+	} else {
+		r.Step("Téléchargement : " + p.Label())
 	}
-	r.Step("Téléchargement : " + p.Label())
 	tmp, err := Download(p.Sources)
 	if err != nil {
 		return err

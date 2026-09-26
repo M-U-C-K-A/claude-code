@@ -5,14 +5,17 @@
 // `return` and `await` are fine here. It must stay idempotent: every run first
 // disposes of the previous one (config changes re-run it live).
 //
-// CB carries: { version, mode, autoClear, rotate, fixed, gallery }.
-//   - `fixed`   data: URL of the chosen fixed image (rotate "off"), or "".
-//   - `gallery` [{ id, mode, file, url }] paintings to pick from.
+// CB carries: { version, mode, autoClear, rotate, fixed, gallery, settings }.
+//   - `fixed`   preview (data: URL) of the fixed image, or "".
+//   - `gallery` [{ id, title, file, url }] pictures to pick from, `url` being a
+//               small preview. The loader sends the full-size picture on
+//               screen afterwards, through setFull(id, url).
 //
 // What it does, on top of the static theme CSS:
-//   1. Picks the background picture (one at random per conversation matching the
-//      light/dark mode, the fixed one, or the one chosen in the panel) and sets
-//      --cb-image, with a data:->blob: fallback if the CSP refuses it.
+//   1. Picks the background picture (one at random per conversation, the fixed
+//      one, or the one chosen in the panel) and paints it behind the page: the
+//      preview at once, then the full-size picture, with a data:->blob:
+//      fallback if the CSP refuses it.
 //   2. Marks large opaque layers the CSS does not know by name (class names
 //      change between Claude releases) so the CSS can make them transparent
 //      (data-cb-clear) or frosted (data-cb-glass) — including the terminal.
@@ -21,7 +24,7 @@
 
 const NS = "__claudeBackdrop";
 try {
-  if (window[NS]) window[NS].dispose();
+  if (window[NS]) window[NS].dispose({ rerun: true });
 } catch {}
 
 const root = document.documentElement;
@@ -64,7 +67,17 @@ let disposed = false;
 // ---------------------------------------------------------------- image choice
 
 let chosen = { id: "none", image: "pending", url: "" };
-let blobUrl = "";
+// A blob: URL on screen is handed over from the previous run, not revoked.
+let blobUrl = window.__claudeBackdropBlob || "";
+delete window.__claudeBackdropBlob;
+
+// The last full-size picture received, kept on window across re-runs so a
+// settings change does not fetch it again.
+const FULL = "__claudeBackdropFull";
+const fullFor = (id) => {
+  const f = window[FULL];
+  return f && f.id === id ? f.url : "";
+};
 
 function detectMode() {
   if (CB.mode === "dark" || CB.mode === "light") return CB.mode;
@@ -149,7 +162,28 @@ const canLoad = (src) =>
     img.src = src;
   });
 
-// Point --cb-image at a URL the page will actually render: data: first, then a
+// The picture goes into a stylesheet built here, not into the --cb-image
+// variable: Chromium drops a custom property over 2 MB, and a 4K picture as a
+// data: URL is bigger. The sheet outlives re-runs (settings changes re-run
+// this script), so the picture does not blink. CSSOM is not subject to the
+// page's style-src CSP; the picture itself is, hence the blob: fallback.
+const SHEET = "__claudeBackdropSheet";
+function picture(url) {
+  let sheet = window[SHEET];
+  if (!sheet) {
+    sheet = window[SHEET] = new CSSStyleSheet();
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+  }
+  sheet.replaceSync(url ? `html body::before { background-image: url("${url}") !important; }` : "");
+}
+function removePicture() {
+  const sheet = window[SHEET];
+  if (!sheet) return;
+  document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== sheet);
+  delete window[SHEET];
+}
+
+// Paint a URL the page will actually render: data: first, then a
 // blob: of the same bytes if the CSP refuses it, else the no-image gradient.
 async function showImage(url, id) {
   chosen = { id, image: "pending", url };
@@ -159,12 +193,12 @@ async function showImage(url, id) {
   }
   root.removeAttribute(NOIMAGE);
   if (!url) {
-    root.style.removeProperty("--cb-image");
+    picture("");
     root.setAttribute(NOIMAGE, "");
     chosen.image = "none";
     return;
   }
-  const setVar = (value) => root.style.setProperty("--cb-image", `url("${value}")`);
+  const setVar = picture;
   if (await canLoad(url)) {
     if (disposed) return;
     setVar(url);
@@ -189,15 +223,22 @@ async function showImage(url, id) {
     }
   } catch {}
   if (disposed) return;
-  root.style.removeProperty("--cb-image");
+  picture("");
   root.setAttribute(NOIMAGE, "");
   chosen.image = "blocked";
 }
 
 const applyImage = () => {
   const pick = pickUrl();
-  return showImage(pick.url, pick.id);
+  return showImage(fullFor(pick.id) || pick.url, pick.id);
 };
+
+// Called by the loader with the full-size picture of `id`.
+async function setFull(id, url) {
+  if (!id || !url) return;
+  window[FULL] = { id, url };
+  if (!disposed && chosen.id === id) await showImage(url, id);
+}
 
 // ---------------------------------------------------------------- opaque layers
 
@@ -379,17 +420,18 @@ function pickHere(url, id) {
     if (id) sessionStorage.setItem("cb-pick-id", id);
     else sessionStorage.removeItem("cb-pick-id");
   } catch {}
-  showImage(url, id || "choisi").then(renderGrid);
+  showImage(fullFor(id) || url, id || "choisi").then(renderGrid);
+  if (id && !fullFor(id)) api.want = id; // the loader sends the full size
+
 }
 
 let gridEl = null;
 function renderGrid() {
   if (!gridEl) return;
   gridEl.textContent = "";
-  const cur = currentUrl();
   for (const it of items()) {
     const cell = el("button", { className: "cb-thumb", type: "button" });
-    if (it.url === cur) cell.classList.add("cb-current");
+    if (it.id === chosen.id) cell.classList.add("cb-current");
     cell.style.backgroundImage = `url("${it.url}")`;
     cell.title = it.title || it.id;
     cell.onclick = () => pickHere(it.url, it.id);
@@ -517,8 +559,10 @@ function buildUI() {
   const def = el("button", { className: "cb-default", type: "button", textContent: "Définir par défaut" });
   def.title = "Utiliser l'image affichée dans toutes les fenêtres";
   def.onclick = () => {
-    const url = currentUrl();
-    if (url) sendCmd({ action: "default", dataUrl: url });
+    // A gallery picture goes by id (the loader uses its full-size file); only
+    // an unknown one is sent as data, which must fit in localStorage.
+    if (items().some((i) => i.id === chosen.id)) sendCmd({ action: "default", id: chosen.id });
+    else if (currentUrl()) sendCmd({ action: "default", dataUrl: currentUrl() });
   };
   foot.append(rot, def);
 
@@ -548,7 +592,9 @@ function buildUI() {
 
 const observer = new MutationObserver(schedule);
 
-function dispose() {
+// On a re-run ({ rerun: true }) the picture stays up for the next run to
+// replace; otherwise (theme turned off) it goes.
+function dispose({ rerun = false } = {}) {
   disposed = true;
   clearTimeout(timer);
   observer.disconnect();
@@ -563,7 +609,12 @@ function dispose() {
   root.removeAttribute(MODE);
   root.removeAttribute(NOIMAGE);
   root.style.removeProperty("--cb-image");
-  if (blobUrl) URL.revokeObjectURL(blobUrl);
+  if (rerun) {
+    if (blobUrl) window.__claudeBackdropBlob = blobUrl;
+  } else {
+    removePicture();
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+  }
   if (window[NS] === api) delete window[NS];
 }
 
@@ -571,6 +622,7 @@ const status = () => ({
   version: CB.version,
   image: chosen.image,
   painting: chosen.id,
+  full: Boolean(fullFor(chosen.id)),
   mode: root.getAttribute(MODE),
   viewport: [window.innerWidth, window.innerHeight],
   cleared: document.querySelectorAll(`[${CLEAR}]`).length,
@@ -579,7 +631,7 @@ const status = () => ({
   opaque,
 });
 
-const api = { version: CB.version, dispose, rescan: run, status };
+const api = { version: CB.version, dispose, rescan: run, status, setFull, want: null };
 window[NS] = api;
 
 root.setAttribute(MODE, detectMode());

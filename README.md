@@ -80,6 +80,18 @@ cette conversation (un rechargement garde la même), tirée de la galerie :
 d'Athènes* (tous du domaine public, téléchargés depuis Wikimedia Commons), plus
 les images que tu ajoutes.
 
+Les tableaux sont téléchargés en **4K** (3840 px) quand la source le permet ;
+*Pandémonium* plafonne à 2843 px, le plus grand scan disponible. Les images en
+1600 px d'une version précédente sont retéléchargées à la prochaine
+installation. Pour que Claude reste fluide, la page ne reçoit qu'un aperçu de
+chaque image, puis l'image affichée en pleine résolution.
+
+Les fichiers sont dans `~/Library/Application Support/ClaudeBackdrop/gallery/`
+(`socrates.jpg`, `horatii.jpg`, `pandemonium.jpg`, `school-of-athens.jpg`, et
+tes images `custom-….jpg`, listés dans `manifest.json`). Tu peux y remplacer un
+tableau par ta propre version sous le même nom : il n'est pas retéléchargé tant
+qu'il fait au moins 2000 px (16 Mo au plus).
+
 ### Le bouton galerie dans Claude
 
 Un petit bouton 🖼 apparaît **en haut à droite** de Claude. Il ouvre un panneau

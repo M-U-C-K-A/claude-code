@@ -2,6 +2,8 @@ package backdrop
 
 import (
 	"encoding/json"
+	"image"
+	"image/jpeg"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -227,6 +229,43 @@ func answer(t *testing.T, body string) commonsAnswer {
 		t.Fatal(err)
 	}
 	return a
+}
+
+func writeJPEG(t *testing.T, file string, w, h int) {
+	t.Helper()
+	f, err := os.Create(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := jpeg.Encode(f, image.NewRGBA(image.Rect(0, 0, w, h)), nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOldLowResPaintingsAreUpgraded(t *testing.T) {
+	b := testBackdrop(t)
+	os.MkdirAll(b.path("gallery"), 0o755)
+	writeJPEG(t, b.PaintingFile("socrates"), 2400, 1600)
+	writeJPEG(t, b.PaintingFile("horatii"), 1600, 1066)
+	if longSide(b.PaintingFile("socrates")) != 2400 || longSide(b.PaintingFile("horatii")) != 1600 {
+		t.Fatal("longSide misread the pictures")
+	}
+	socrates, _ := PaintingByID("socrates")
+	r := &silent{}
+	if err := b.ensurePainting(socrates, r); err != nil || len(r.lines) != 0 {
+		t.Fatalf("a large enough painting must stay as is: %v %v", err, r.lines)
+	}
+	// The 1600 px one would be downloaded again (no network here: only check
+	// that it tries, and that the old file survives the failure).
+	horatii, _ := PaintingByID("horatii")
+	horatii.Sources = []string{"https://127.0.0.1:1/nothing.jpg"}
+	if err := b.ensurePainting(horatii, r); err == nil || !strings.Contains(strings.Join(r.lines, "\n"), "haute définition") {
+		t.Fatalf("a 1600 px painting should be fetched again, got %v %v", err, r.lines)
+	}
+	if longSide(b.PaintingFile("horatii")) != 1600 {
+		t.Fatal("a failed download must keep the old picture")
+	}
 }
 
 func TestParseCommons(t *testing.T) {

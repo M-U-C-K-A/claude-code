@@ -38,8 +38,9 @@
   --ayu-red: #d95757;         /* danger */
   --ayu-purple: #d2a6ff;      /* pro / accent-2 */
 
-  /* control knobs (the loader overrides these from config.json; --cb-image is
-   * set per page by the page script) */
+  /* control knobs (the loader overrides these from config.json). The picture
+   * itself is painted on body::before by the page script's own stylesheet;
+   * --cb-image is only the fallback when it has none. */
   --cb-image: none;
   --cb-dim: 0.55;
   --cb-glass: 0.5;

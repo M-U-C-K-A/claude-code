@@ -66,6 +66,7 @@ type PageReport struct {
 type PageState struct {
 	Image     string  `json:"image"`
 	Painting  string  `json:"painting"`
+	Full      bool    `json:"full"` // the full-size picture replaced the preview
 	Mode      string  `json:"mode"`
 	Cleared   int     `json:"cleared"`
 	Glass     int     `json:"glass"`
