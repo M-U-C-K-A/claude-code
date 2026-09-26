@@ -94,6 +94,19 @@ selon le mode : en **sombre**, *La Mort de Socrate*, *Le Serment des Horaces* ou
 
 Ids de la galerie : `socrates`, `horatii`, `pandemonium`, `school-of-athens`.
 
+### Le bouton galerie dans Claude
+
+Un petit bouton 🖼 apparaît **en haut à droite** de Claude. Il ouvre un panneau
+où tu peux, sans passer par le terminal :
+
+- voir les fonds disponibles et **changer celui de la fenêtre** d'un clic ;
+- **ajouter ta propre image** (bouton ＋, elle rejoint la galerie) ;
+- activer/couper l'**image au hasard par conversation** ;
+- **Définir par défaut** l'image affichée (pour toutes les fenêtres).
+
+Il gêne les icônes de la barre de titre ? Déplace-le dans `custom.css` :
+`#cb-gallery-btn { right: 200px !important; }`.
+
 Tout se recharge en direct. Tes propres règles CSS vont dans
 `~/Library/Application Support/ClaudeBackdrop/custom.css` (jamais écrasé) ;
 `theme.css` du même dossier est, lui, remplacé à chaque `install`.
@@ -134,6 +147,7 @@ depuis [claude.ai/download](https://claude.ai/download).
 | `imageblur` | `6`             | flou de l'image de fond en px (0 à 60) |
 | `glass`     | `0.5`           | opacité du verre (barre latérale, panneaux, terminal), 0 à 1 |
 | `blur`      | `22`            | flou du verre en px (0 = sans flou) |
+| `terminalopacity` | `0.82`    | opacité du terminal, 0.3 à 1 (1 = terminal opaque, sans transparence) |
 | `position`  | `center`        | cadrage : `center`, `top`, `50% 20%`… |
 | `size`      | `cover`         | `cover` (remplit) ou `contain` |
 | `mode`      | `dark`          | `dark`, `light` ou `auto` (suit le thème de Claude) |

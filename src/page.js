@@ -7,17 +7,17 @@
 //
 // CB carries: { version, mode, autoClear, rotate, fixed, gallery }.
 //   - `fixed`   data: URL of the chosen fixed image (rotate "off"), or "".
-//   - `gallery` [{ id, mode, url }] paintings to pick from per conversation.
+//   - `gallery` [{ id, mode, file, url }] paintings to pick from.
 //
 // What it does, on top of the static theme CSS:
-//   1. Picks the background picture (one at random per conversation, matching
-//      the light/dark mode, or the fixed one) and sets --cb-image. If the page
-//      CSP refuses a data: image it retries as a blob:, then gives up to a
-//      gradient (image: "blocked").
+//   1. Picks the background picture (one at random per conversation matching the
+//      light/dark mode, the fixed one, or the one chosen in the panel) and sets
+//      --cb-image, with a data:->blob: fallback if the CSP refuses it.
 //   2. Marks large opaque layers the CSS does not know by name (class names
 //      change between Claude releases) so the CSS can make them transparent
 //      (data-cb-clear) or frosted (data-cb-glass) — including the terminal.
-//   3. Reports what it did, for `claude-backdrop status` / `doctor`.
+//   3. Adds a small gallery button (top-right) to browse, add and switch images.
+//   4. Reports what it did, for `claude-backdrop status` / `doctor`.
 
 const NS = "__claudeBackdrop";
 try {
@@ -30,15 +30,12 @@ const GLASS = "data-cb-glass";
 const TERM = "data-cb-term";
 const NOIMAGE = "data-cb-noimage";
 const MODE = "data-cb-mode";
+const UI_ID = "cb-ui";
 
-// Never touch what floats above the page (dialogs, menus, popovers, tooltips)
-// nor surfaces whose colours carry meaning (code, diffs, tables). The terminal
-// is handled on its own (see markTerminals) so it is kept out of the generic
-// pass here.
 const KEEP = [
   "dialog", '[role="dialog"]', '[role="alertdialog"]', '[aria-modal="true"]',
   '[role="menu"]', '[role="listbox"]', '[role="tooltip"]', "[data-radix-popper-content-wrapper]",
-  "pre", "code", "table", "diffs-container", ".xterm",
+  "pre", "code", "table", "diffs-container", ".xterm", `#${UI_ID}`,
 ].join(",");
 const CONTENT = "pre, code, table, diffs-container, img, video, canvas, iframe, .xterm";
 const EDITOR = '.ProseMirror, [contenteditable="true"], textarea';
@@ -62,23 +59,23 @@ const depth = (el) => {
   return d;
 };
 
+let disposed = false;
+
 // ---------------------------------------------------------------- image choice
 
-let disposed = false;
-let chosen = { id: "none", image: "pending" };
+let chosen = { id: "none", image: "pending", url: "" };
 let blobUrl = "";
 
 function detectMode() {
   if (CB.mode === "dark" || CB.mode === "light") return CB.mode;
-  const el = document.querySelector('[data-mode="light"], .light, .lightTheme');
-  if (el && !document.querySelector('[data-mode="dark"], .dark, .darkTheme')) return "light";
+  const light = document.querySelector('[data-mode="light"], .light, .lightTheme');
   const dark = document.querySelector('[data-mode="dark"], .dark, .darkTheme');
-  return dark ? "dark" : "dark";
+  if (light && !dark) return "light";
+  return "dark";
 }
 
-// Stable per-conversation seed: kept in sessionStorage so a reload keeps the
-// same painting, while a different window (a different conversation) gets its
-// own. Falls back to a per-run random if storage is blocked.
+// Stable per-conversation seed (sessionStorage): a reload keeps the same
+// painting, a different window gets its own.
 let seedCache = null;
 function seed() {
   if (seedCache !== null) return seedCache;
@@ -102,11 +99,15 @@ const hash = (str) => {
   }
   return h >>> 0;
 };
+const galleryList = () => (Array.isArray(CB.gallery) ? CB.gallery : []);
 
-// The picture for this conversation: fixed one, or one drawn from the gallery
-// for the current mode.
-function pickImage() {
-  const gallery = Array.isArray(CB.gallery) ? CB.gallery : [];
+function pickUrl() {
+  // A choice made in the panel wins, and sticks for this conversation.
+  try {
+    const chosenUrl = sessionStorage.getItem("cb-pick-url");
+    if (chosenUrl) return { id: "choisi", url: chosenUrl };
+  } catch {}
+  const gallery = galleryList();
   if (CB.rotate !== "off" && gallery.length) {
     const mode = detectMode();
     let pool = gallery.filter((g) => g.mode === mode);
@@ -130,46 +131,43 @@ const canLoad = (src) =>
     img.src = src;
   });
 
-// Set --cb-image to a URL the page will actually render. data: first; if the
-// CSP refuses it, re-serve the same bytes as a blob:; else fall back to the
-// no-image gradient.
-async function applyImage() {
-  const pick = pickImage();
-  chosen = { id: pick.id, image: "pending" };
+// Point --cb-image at a URL the page will actually render: data: first, then a
+// blob: of the same bytes if the CSP refuses it, else the no-image gradient.
+async function showImage(url, id) {
+  chosen = { id, image: "pending", url };
   if (blobUrl) {
     URL.revokeObjectURL(blobUrl);
     blobUrl = "";
   }
   root.removeAttribute(NOIMAGE);
-  if (!pick.url) {
+  if (!url) {
     root.style.removeProperty("--cb-image");
     root.setAttribute(NOIMAGE, "");
     chosen.image = "none";
     return;
   }
   const setVar = (value) => root.style.setProperty("--cb-image", `url("${value}")`);
-  if (await canLoad(pick.url)) {
+  if (await canLoad(url)) {
     if (disposed) return;
-    setVar(pick.url);
-    chosen.image = pick.url.startsWith("data:") ? "data" : "url";
+    setVar(url);
+    chosen.image = url.startsWith("data:") ? "data" : "url";
     return;
   }
-  // CSP blocked the data: URL — try a blob: of the same bytes.
   try {
-    if (pick.url.startsWith("data:")) {
-      const comma = pick.url.indexOf(",");
-      const mime = /^data:([^;,]+)/.exec(pick.url)?.[1] || "image/jpeg";
-      const binary = atob(pick.url.slice(comma + 1));
+    if (url.startsWith("data:")) {
+      const comma = url.indexOf(",");
+      const mime = /^data:([^;,]+)/.exec(url)?.[1] || "image/jpeg";
+      const binary = atob(url.slice(comma + 1));
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-      const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
-      if (!disposed && (await canLoad(url))) {
-        blobUrl = url;
-        setVar(url);
+      const blob = URL.createObjectURL(new Blob([bytes], { type: mime }));
+      if (!disposed && (await canLoad(blob))) {
+        blobUrl = blob;
+        setVar(blob);
         chosen.image = "blob";
         return;
       }
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(blob);
     }
   } catch {}
   if (disposed) return;
@@ -178,10 +176,13 @@ async function applyImage() {
   chosen.image = "blocked";
 }
 
+const applyImage = () => {
+  const pick = pickUrl();
+  return showImage(pick.url, pick.id);
+};
+
 // ---------------------------------------------------------------- opaque layers
 
-// Elements under a grid of points across the window, plus the top and bottom
-// edges (title bars, composer docks). Parents come first.
 function sample(vw, vh) {
   const found = new Set();
   const COLS = 8;
@@ -208,39 +209,42 @@ function classify(el, vw, vh) {
   const r = el.getBoundingClientRect();
   const area = visibleArea(r, vw, vh);
   if (area <= 0) return null;
-  // Opaque fillers inside a frosted panel would hide the frost: clear them.
   const host = el.parentElement && el.parentElement.closest(`[${GLASS}="panel"], .dframe-sidebar`);
   if (host) return area >= 0.5 * visibleArea(host.getBoundingClientRect(), vw, vh) ? "clear" : null;
-  // Page-sized layers.
   if (area >= 0.3 * vw * vh && r.width >= 0.45 * vw) return "clear";
-  // Wide bands glued to the top or bottom edge: title bars, composer docks.
   const edge = r.top <= 8 || r.bottom >= vh - 8;
   if (edge && r.width >= 0.45 * vw && r.height >= 24 && r.height <= 0.4 * vh && !el.querySelector(CONTENT)) return "clear";
-  // Tall side panels: frosted glass, like the sidebar.
   if (r.height >= 0.6 * vh && r.width >= 160 && r.width < 0.45 * vw) return "glass";
   return null;
 }
 
-// Terminals: make the xterm layers see-through and frost the pane behind them,
-// so the picture shows through the empty cells while coloured output keeps its
-// colours. Kept out of the generic pass (KEEP has .xterm).
+// Terminals (xterm.js). Its background is painted on an opaque canvas, so CSS
+// cannot clear it; instead we frost the pane behind it, clear the wrappers in
+// between, and make the xterm itself slightly translucent (--cb-term-opacity)
+// so the frosted picture shows through. Coloured output stays readable.
 function markTerminals(vw, vh) {
   for (const term of document.querySelectorAll(".xterm")) {
     if (!(term instanceof HTMLElement)) continue;
     term.setAttribute(TERM, "");
     let pane = null;
-    let el = term;
+    const chain = [];
+    let el = term.parentElement;
     for (let i = 0; el && i < 8; i += 1, el = el.parentElement) {
       const r = el.getBoundingClientRect();
-      if (r.width >= 0.98 * vw && r.height >= 0.98 * vh) break; // reached the window
+      if (r.width >= 0.98 * vw && r.height >= 0.98 * vh) break;
       if (r.height >= 0.35 * vh && r.width >= 0.22 * vw) pane = el;
+      else chain.push(el);
     }
-    if (pane && !pane.hasAttribute(GLASS)) pane.setAttribute(GLASS, "term");
+    if (pane) {
+      if (!pane.hasAttribute(GLASS)) pane.setAttribute(GLASS, "term");
+      // wrappers between the xterm and the pane must not keep an opaque fill
+      for (const w of chain) {
+        if (pane.contains(w) && !w.hasAttribute(GLASS)) w.setAttribute(CLEAR, "");
+      }
+    }
   }
 }
 
-// The composer frame: the first rounded ancestor of the editor. Fallback for
-// when Claude's own prompt tokens are not in use and the frame stays opaque.
 function markComposer() {
   for (const editor of document.querySelectorAll(EDITOR)) {
     if (!(editor instanceof HTMLElement) || editor.closest(KEEP)) continue;
@@ -260,7 +264,6 @@ function markComposer() {
   }
 }
 
-// Large opaque surfaces still left after marking, for diagnostics.
 function leftovers(list, vw, vh) {
   const out = [];
   for (const el of list) {
@@ -295,6 +298,7 @@ function run() {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   if (!vw || !vh || !document.body) return;
+  buildUI();
   const list = sample(vw, vh);
   if (CB.autoClear !== false) {
     markTerminals(vw, vh);
@@ -308,11 +312,154 @@ function run() {
   opaque = leftovers(list, vw, vh);
 }
 
-// At most one scan every 700 ms: streaming replies mutate the DOM constantly.
 function schedule() {
   if (timer || disposed) return;
   timer = setTimeout(run, Math.max(120, 700 - (Date.now() - lastRun)));
 }
+
+// ---------------------------------------------------------------- gallery panel
+
+const el = (tag, props = {}, style = {}) => {
+  const node = document.createElement(tag);
+  Object.assign(node, props);
+  Object.assign(node.style, style);
+  return node;
+};
+const svg = (paths, size = 18) => {
+  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  s.setAttribute("viewBox", "0 0 24 24");
+  s.setAttribute("width", size);
+  s.setAttribute("height", size);
+  s.setAttribute("fill", "none");
+  s.setAttribute("stroke", "currentColor");
+  s.setAttribute("stroke-width", "2");
+  s.setAttribute("stroke-linecap", "round");
+  s.setAttribute("stroke-linejoin", "round");
+  for (const d of paths) {
+    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    p.setAttribute("d", d);
+    s.appendChild(p);
+  }
+  return s;
+};
+
+// Leave a command for the loader to persist (it polls localStorage).
+function sendCmd(cmd) {
+  try {
+    localStorage.setItem("cb-cmd", JSON.stringify({ ts: Date.now(), ...cmd }));
+  } catch {}
+}
+
+// Everything the panel can show: the gallery + the fixed image, de-duplicated.
+function items() {
+  const list = galleryList().map((g) => ({ id: g.id, url: g.url, file: g.file, mode: g.mode, custom: /^custom-/.test(g.id) }));
+  if (CB.fixed && !list.some((i) => i.url === CB.fixed)) list.unshift({ id: "fixed", url: CB.fixed, fixed: true });
+  return list;
+}
+
+function currentUrl() {
+  return chosen.url || "";
+}
+
+function pickHere(url) {
+  try {
+    sessionStorage.setItem("cb-pick-url", url);
+  } catch {}
+  showImage(url, "choisi").then(renderGrid);
+}
+
+let gridEl = null;
+function renderGrid() {
+  if (!gridEl) return;
+  gridEl.textContent = "";
+  const cur = currentUrl();
+  for (const it of items()) {
+    const cell = el("div", { className: "cb-thumb" });
+    if (it.url === cur) cell.classList.add("cb-current");
+    cell.style.backgroundImage = `url("${it.url}")`;
+    cell.title = it.fixed ? "Image fixe" : it.custom ? "Ajoutée" : it.id;
+    cell.onclick = () => pickHere(it.url);
+    if (it.custom && it.file) {
+      const del = el("button", { className: "cb-del", type: "button", title: "Retirer" });
+      del.appendChild(svg(["M6 6l12 12M18 6L6 18"], 12));
+      del.onclick = (e) => {
+        e.stopPropagation();
+        sendCmd({ action: "delete", file: it.file });
+        cell.remove();
+      };
+      cell.appendChild(del);
+    }
+    gridEl.appendChild(cell);
+  }
+  // add tile
+  const add = el("label", { className: "cb-thumb cb-add", title: "Ajouter une image" });
+  add.appendChild(svg(["M12 5v14M5 12h14"], 22));
+  const input = el("input", { type: "file", accept: "image/*" });
+  input.style.display = "none";
+  input.onchange = () => {
+    const f = input.files && input.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result || "");
+      if (!url.startsWith("data:image/")) return;
+      sendCmd({ action: "add", name: f.name, dataUrl: url, mode: detectMode() });
+      pickHere(url);
+    };
+    reader.readAsDataURL(f);
+  };
+  add.appendChild(input);
+  gridEl.appendChild(add);
+}
+
+function buildUI() {
+  if (document.getElementById(UI_ID) || !document.body) return;
+  const wrap = el("div", { id: UI_ID });
+
+  const btn = el("button", { id: "cb-gallery-btn", type: "button", title: "Fonds d'écran (claude-backdrop)" });
+  btn.appendChild(svg(["M3 5h18v14H3z", "M3 15l5-5 4 4 3-3 6 6"], 18));
+
+  const panel = el("div", { id: "cb-gallery-panel", hidden: true });
+  const head = el("div", { className: "cb-head" });
+  head.appendChild(el("span", { textContent: "Fonds d'écran" }));
+  const close = el("button", { className: "cb-x", type: "button", title: "Fermer" });
+  close.appendChild(svg(["M6 6l12 12M18 6L6 18"], 14));
+  close.onclick = () => (panel.hidden = true);
+  head.appendChild(close);
+
+  gridEl = el("div", { className: "cb-grid" });
+
+  const foot = el("div", { className: "cb-foot" });
+  const rot = el("label", { className: "cb-rotate" });
+  const check = el("input", { type: "checkbox" });
+  check.checked = CB.rotate !== "off";
+  check.onchange = () => {
+    sendCmd({ action: "rotate", value: check.checked ? "on" : "off" });
+    if (check.checked) {
+      try {
+        sessionStorage.removeItem("cb-pick-url");
+      } catch {}
+    }
+  };
+  rot.append(check, el("span", { textContent: "Une image au hasard par conversation" }));
+  const def = el("button", { className: "cb-default", type: "button", textContent: "Définir par défaut" });
+  def.title = "Utiliser l'image affichée dans toutes les fenêtres";
+  def.onclick = () => {
+    const url = currentUrl();
+    if (url) sendCmd({ action: "default", dataUrl: url });
+  };
+  foot.append(rot, def);
+
+  panel.append(head, gridEl, foot);
+  btn.onclick = () => {
+    panel.hidden = !panel.hidden;
+    if (!panel.hidden) renderGrid();
+  };
+  wrap.append(btn, panel);
+  document.body.appendChild(wrap);
+}
+
+// ---------------------------------------------------------------- lifecycle
 
 const observer = new MutationObserver(schedule);
 
@@ -321,11 +468,13 @@ function dispose() {
   clearTimeout(timer);
   observer.disconnect();
   window.removeEventListener("resize", schedule);
-  for (const el of document.querySelectorAll(`[${CLEAR}], [${GLASS}], [${TERM}]`)) {
-    el.removeAttribute(CLEAR);
-    el.removeAttribute(GLASS);
-    el.removeAttribute(TERM);
+  for (const node of document.querySelectorAll(`[${CLEAR}], [${GLASS}], [${TERM}]`)) {
+    node.removeAttribute(CLEAR);
+    node.removeAttribute(GLASS);
+    node.removeAttribute(TERM);
   }
+  document.getElementById(UI_ID)?.remove();
+  gridEl = null;
   root.removeAttribute(MODE);
   root.removeAttribute(NOIMAGE);
   root.style.removeProperty("--cb-image");
@@ -357,7 +506,6 @@ observer.observe(document.body || root, {
   attributeFilter: ["class", "style", "hidden", "data-state", "data-mode"],
 });
 window.addEventListener("resize", schedule);
-// claude.ai keeps rendering after dom-ready: look again once it has settled.
 setTimeout(schedule, 800);
 setTimeout(schedule, 3000);
 

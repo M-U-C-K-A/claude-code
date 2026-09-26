@@ -45,6 +45,7 @@
   --cb-glass: 0.5;
   --cb-blur: 22px;
   --cb-image-blur: 6px;
+  --cb-term-opacity: 0.82;
   --cb-position: center;
   --cb-size: cover;
 
@@ -283,7 +284,13 @@ body, #root, #__next,
   -webkit-backdrop-filter: blur(var(--cb-blur)) saturate(1.1) !important;
   backdrop-filter: blur(var(--cb-blur)) saturate(1.1) !important;
 }
-[data-cb-term],
+/* xterm paints its background on an opaque canvas, so CSS can't clear it: make
+ * the whole terminal slightly translucent instead, so the frosted pane (and the
+ * picture) shows through. --cb-term-opacity 1 turns this off. */
+[data-cb-term] {
+  opacity: var(--cb-term-opacity) !important;
+  background-color: transparent !important;
+}
 [data-cb-term] .xterm-viewport,
 [data-cb-term] .xterm-screen,
 [data-cb-term] .xterm-rows,
@@ -309,3 +316,105 @@ input, textarea, select, [contenteditable="true"], .ProseMirror {
   background: rgb(230 180 80 / 0.28) !important;
   color: var(--ayu-fg) !important;
 }
+
+/* ---------------------------------------------------------------- 4. gallery UI */
+
+/* The gallery button (top-right) and its panel, injected by the page script.
+ * no-drag so it stays clickable over the window's drag region. */
+#cb-ui { position: fixed; inset: 0; z-index: 2147483000; pointer-events: none; }
+#cb-ui > * { pointer-events: auto; -webkit-app-region: no-drag; }
+
+#cb-gallery-btn {
+  position: fixed;
+  top: 9px;
+  right: 132px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: var(--ayu-fg-dim);
+  background: rgb(var(--cb-panel-rgb) / 0.55);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 0 0 1px rgb(191 189 182 / 0.12);
+  cursor: pointer;
+  transition: color .15s, background .15s;
+}
+#cb-gallery-btn:hover { color: var(--ayu-accent); background: rgb(var(--cb-panel-rgb) / 0.8); }
+
+#cb-gallery-panel {
+  position: fixed;
+  top: 48px;
+  right: 16px;
+  width: 320px;
+  max-height: min(70vh, 560px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 14px;
+  color: var(--ayu-fg);
+  background: rgb(11 14 20 / 0.86);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  backdrop-filter: blur(24px) saturate(1.2);
+  box-shadow: 0 20px 60px rgb(0 0 0 / 0.5), inset 0 0 0 1px rgb(191 189 182 / 0.12);
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+#cb-gallery-panel[hidden] { display: none; }
+#cb-gallery-panel .cb-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-weight: 600; font-size: 14px; color: var(--ayu-fg);
+}
+#cb-gallery-panel .cb-x, #cb-gallery-panel .cb-del {
+  display: grid; place-items: center;
+  border: 0; background: transparent; color: var(--ayu-muted);
+  cursor: pointer; padding: 2px; border-radius: 6px;
+}
+#cb-gallery-panel .cb-x:hover, #cb-gallery-panel .cb-del:hover { color: var(--ayu-fg); background: rgb(255 255 255 / 0.08); }
+
+#cb-gallery-panel .cb-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+#cb-gallery-panel .cb-thumb {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  border-radius: 8px;
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgb(191 189 182 / 0.1);
+  transition: box-shadow .15s, transform .1s;
+}
+#cb-gallery-panel .cb-thumb:hover { transform: translateY(-1px); box-shadow: inset 0 0 0 1px rgb(230 180 80 / 0.4); }
+#cb-gallery-panel .cb-thumb.cb-current { box-shadow: 0 0 0 2px var(--ayu-accent); }
+#cb-gallery-panel .cb-thumb .cb-del {
+  position: absolute; top: 4px; right: 4px;
+  background: rgb(0 0 0 / 0.5); color: #fff;
+}
+#cb-gallery-panel .cb-add {
+  display: grid; place-items: center;
+  color: var(--ayu-muted);
+  background: rgb(255 255 255 / 0.04);
+  border: 1px dashed rgb(191 189 182 / 0.25);
+}
+#cb-gallery-panel .cb-add:hover { color: var(--ayu-accent); border-color: rgb(230 180 80 / 0.5); }
+
+#cb-gallery-panel .cb-foot {
+  display: flex; flex-direction: column; gap: 10px;
+  border-top: 1px solid rgb(191 189 182 / 0.1);
+  padding-top: 10px;
+}
+#cb-gallery-panel .cb-rotate { display: flex; align-items: center; gap: 8px; color: var(--ayu-fg-dim); cursor: pointer; }
+#cb-gallery-panel .cb-rotate input { accent-color: var(--ayu-accent); }
+#cb-gallery-panel .cb-default {
+  align-self: flex-start;
+  border: 0; cursor: pointer;
+  padding: 6px 12px; border-radius: 8px;
+  color: var(--ayu-bg); background: var(--ayu-accent); font-weight: 600;
+}
+#cb-gallery-panel .cb-default:hover { background: #f0c46a; }

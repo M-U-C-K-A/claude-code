@@ -26,6 +26,7 @@ const DEFAULTS = {
   glass: 0.5,
   blur: 22,
   imageBlur: 6,
+  terminalOpacity: 0.82,
   position: "center",
   size: "cover",
   mode: "dark",
@@ -143,14 +144,24 @@ function currentImage() {
 
 // Rewrite gallery/manifest.json from whichever paintings actually downloaded,
 // so the loader offers only the ones present, each with its light/dark tag.
+// Custom images added from the in-app panel (marked `custom`) are preserved.
 function writeGalleryManifest() {
   const galleryDir = path.join(SUPPORT, "gallery");
-  const manifest = GALLERY.filter((entry) => fs.existsSync(path.join(galleryDir, `${entry.id}.jpg`))).map((entry) => ({
+  fs.mkdirSync(galleryDir, { recursive: true });
+  let previous = [];
+  try {
+    previous = JSON.parse(fs.readFileSync(path.join(galleryDir, "manifest.json"), "utf8"));
+  } catch {}
+  const builtins = GALLERY.filter((entry) => fs.existsSync(path.join(galleryDir, `${entry.id}.jpg`))).map((entry) => ({
     id: entry.id,
     mode: entry.mode,
     title: entry.title,
+    file: `${entry.id}.jpg`,
   }));
-  fs.mkdirSync(galleryDir, { recursive: true });
+  const customs = (Array.isArray(previous) ? previous : [])
+    .filter((e) => e && e.custom && e.file && fs.existsSync(path.join(galleryDir, e.file)))
+    .map((e) => ({ id: e.id, mode: e.mode === "light" ? "light" : "dark", title: e.title || e.id, file: e.file, custom: true }));
+  const manifest = [...builtins, ...customs];
   fs.writeFileSync(path.join(galleryDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   return manifest;
 }
@@ -480,6 +491,7 @@ const SETTINGS = {
   imageblur: { help: "flou de l'image de fond en px, 0 à 60", parse: (v) => number(v, 0, 60), key: "imageBlur" },
   glass: { help: "opacité du verre (barre latérale, panneaux, terminal), 0 à 1", parse: (v) => number(v, 0, 1) },
   blur: { help: "flou du verre en px, 0 à 80 (0 = sans flou)", parse: (v) => number(v, 0, 80) },
+  terminalopacity: { help: "opacité du terminal, 0.3 à 1 (1 = terminal opaque)", parse: (v) => number(v, 0.3, 1), key: "terminalOpacity" },
   position: { help: "cadrage : center, top, bottom, « 50% 30% »…", parse: (v) => (/^[a-z0-9 .%-]{1,40}$/i.test(v) ? v : null) },
   size: { help: "cover (remplit la fenêtre) ou contain", parse: (v) => (["cover", "contain"].includes(v) ? v : null) },
   mode: { help: "auto, dark ou light : suit le thème de Claude (auto) ou le force", parse: (v) => (["auto", "dark", "light"].includes(v) ? v : null) },
