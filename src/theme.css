@@ -1,0 +1,268 @@
+/* Claude Backdrop — theme (Ayu Dark)
+ *
+ * Injected into the claude.ai pages of Claude Desktop with
+ * webContents.insertCSS(..., { cssOrigin: "user" }): in the "user" origin an
+ * !important rule beats the app's own !important rules, whatever their
+ * specificity. The loader appends, after this file:
+ *   :root { --cb-image; --cb-dim; --cb-glass; --cb-blur; --cb-position; --cb-size }
+ * built from config.json, then your custom.css.
+ *
+ * This file is overwritten by `claude-backdrop install`: put your own rules in
+ * custom.css (same folder). Both files reload live, no restart needed.
+ *
+ * Two jobs:
+ *   1. A background picture, behind a dark veil (heavier at the bottom so the
+ *      transcript and composer stay legible).
+ *   2. Everything else in Ayu Dark: transparent structural layers, frosted
+ *      panels, and Claude's own design tokens remapped to the Ayu palette.
+ *
+ * Selectors and tokens come from Claude Desktop's desktop frame (.dframe-*),
+ * its Claude Code view (.epitaxy-*) and its design tokens (--bg-*, --text-*,
+ * --cds-*, --df-*, --surface-*). Anything they miss is caught by the page
+ * script, which marks large opaque layers [data-cb-clear] / [data-cb-glass]. */
+
+/* ---------------------------------------------------------------- Ayu Dark palette */
+
+:root {
+  /* https://github.com/ayu-theme — Ayu Dark */
+  --ayu-bg: #0b0e14;          /* editor background (darkest) */
+  --ayu-panel: #0d1017;       /* panels / sidebar base */
+  --ayu-line: #11151c;        /* elevated line / popover */
+  --ayu-fg: #bfbdb6;          /* primary text */
+  --ayu-fg-dim: #acb6bf;      /* secondary text */
+  --ayu-muted: #8a9199;       /* muted / comments */
+  --ayu-accent: #e6b450;      /* signature gold — brand, cursor, active */
+  --ayu-orange: #ff8f40;      /* keyword / warning-ish */
+  --ayu-blue: #59c2ff;        /* links / info */
+  --ayu-green: #aad94c;       /* success */
+  --ayu-red: #d95757;         /* danger */
+  --ayu-purple: #d2a6ff;      /* pro / accent-2 */
+
+  /* control knobs (the loader overrides these from config.json) */
+  --cb-image: none;
+  --cb-dim: 0.5;
+  --cb-glass: 0.55;
+  --cb-blur: 18px;
+  --cb-position: center;
+  --cb-size: cover;
+
+  --cb-veil-rgb: 11 14 20;        /* Ayu bg, used to darken the picture */
+  --cb-panel-rgb: 13 16 23;       /* Ayu panel, used for frosted glass */
+  --cb-field-rgb: 15 20 28;       /* composer glass */
+  --cb-field-alpha: 0.55;
+  --cb-edge: rgb(230 180 80 / 0.14);   /* faint gold hairline */
+  --cb-fallback: #0b0e14;
+}
+
+/* ---------------------------------------------------------------- Ayu tokens */
+
+/* Remap Claude's semantic design tokens to Ayu Dark. Values are HSL triplets
+ * (no hsl() wrapper): the app consumes them as hsl(var(--token)). These win in
+ * the user origin, so they apply in both v1 and v2 colour systems, and whether
+ * Claude itself is set to dark or light. */
+:root,
+body,
+[data-mode],
+[data-theme],
+.cds-root,
+.epitaxy-root,
+.dframe-root,
+.darkTheme,
+.dark {
+  /* text */
+  --text-000: 48 6% 73%;
+  --text-100: 48 6% 73%;
+  --text-200: 210 16% 71%;
+  --text-300: 210 16% 71%;
+  --text-400: 213 8% 57%;
+  --text-500: 213 8% 57%;
+
+  /* brand = Ayu gold; blue accent for links; purple for Pro */
+  --accent-brand: 40 75% 61%;
+  --brand-000: 40 75% 55%;
+  --brand-100: 40 75% 61%;
+  --brand-200: 40 78% 66%;
+  --brand-900: 216 22% 9%;
+  --accent-000: 202 100% 67%;
+  --accent-100: 205 90% 62%;
+  --accent-200: 205 90% 62%;
+  --accent-900: 210 45% 22%;
+  --accent-pro-000: 270 100% 83%;
+  --accent-pro-100: 268 70% 68%;
+  --accent-pro-200: 268 60% 60%;
+  --accent-pro-900: 268 30% 22%;
+  --accent-hover: 40 78% 66%;
+
+  /* surfaces used by popovers / menus / cards (main areas stay transparent) */
+  --bg-000: 216 20% 11%;
+  --bg-100: 218 24% 9%;
+  --bg-200: 219 26% 8%;
+  --bg-300: 220 28% 7%;
+  --bg-400: 220 30% 6%;
+  --bg-500: 220 30% 6%;
+
+  /* borders: kept light-ish (dark borders get their subtlety from use-site alpha) */
+  --border-100: 214 14% 55%;
+  --border-200: 214 14% 55%;
+  --border-300: 214 12% 45%;
+  --border-400: 214 12% 45%;
+
+  /* status */
+  --danger-000: 0 72% 68%;
+  --danger-100: 0 63% 60%;
+  --danger-200: 0 63% 60%;
+  --danger-900: 0 40% 20%;
+  --success-000: 80 70% 62%;
+  --success-100: 80 66% 57%;
+  --success-200: 80 66% 57%;
+  --success-900: 90 40% 16%;
+  --warning-000: 34 100% 66%;
+  --warning-100: 25 100% 63%;
+  --warning-200: 25 100% 63%;
+  --warning-900: 30 45% 18%;
+
+  /* text/icons on a filled (gold/blue) button: dark, like Ayu */
+  --oncolor-100: 216 27% 8%;
+  --oncolor-200: 216 24% 10%;
+  --oncolor-300: 216 24% 10%;
+
+  --claude-accent-clay: var(--ayu-accent);
+}
+
+/* Console Design System (newer surfaces: popovers, the Cowork/code frame). */
+:root,
+.cds-root,
+.epitaxy-root,
+[data-mode="dark"],
+[data-mode="light"] {
+  --cds-clay: hsl(var(--accent-brand)) !important;
+  --cds-clay-emphasized: hsl(var(--brand-000)) !important;
+  --cds-text-primary: var(--ayu-fg) !important;
+  --cds-text-secondary: var(--ayu-fg-dim) !important;
+  --cds-text-muted: var(--ayu-muted) !important;
+  --cds-text-accent: hsl(var(--accent-000)) !important;
+  --cds-border: rgb(191 189 182 / 0.12) !important;
+  --cds-border-strong: rgb(191 189 182 / 0.2) !important;
+  --cds-fill-brand: hsl(var(--brand-000)) !important;
+  --cds-fill-brand-hover: hsl(var(--accent-brand)) !important;
+  --cds-fill-accent: hsl(var(--accent-100)) !important;
+  --cds-text-danger: hsl(var(--danger-000)) !important;
+  --cds-text-success: hsl(var(--success-000)) !important;
+  --cds-text-warning: hsl(var(--warning-000)) !important;
+}
+
+/* Claude Code (Epitaxy) view keeps its palette on .epitaxy-root. */
+.epitaxy-root,
+[data-mode="dark"] .epitaxy-root,
+[data-mode="light"] .epitaxy-root {
+  --_brand-clay: 40 75% 61% !important;
+  --accent: var(--ayu-accent) !important;
+  --accent-brand: 40 75% 61% !important;
+  --accent-hover: var(--ayu-orange) !important;
+  --text-primary: var(--ayu-fg) !important;
+  --text-secondary: var(--ayu-fg-dim) !important;
+  --text-muted: var(--ayu-muted) !important;
+  --surface-panel: rgb(var(--cb-panel-rgb) / var(--cb-glass)) !important;
+  --surface-panel-elevated: rgb(var(--cb-panel-rgb) / calc(var(--cb-glass) + 0.08)) !important;
+  --surface-popover: var(--ayu-line) !important;
+  --surface-toast: var(--ayu-line) !important;
+}
+
+/* ---------------------------------------------------------------- 1. the picture */
+
+/* Painted on the canvas, behind everything. Lighter veil at the top, heavier at
+ * the bottom, like the reference: the picture reads, the UI stays legible. */
+html {
+  background-color: var(--cb-fallback) !important;
+  background-image:
+    linear-gradient(to bottom,
+      rgb(var(--cb-veil-rgb) / calc(var(--cb-dim) * 0.55)) 0%,
+      rgb(var(--cb-veil-rgb) / var(--cb-dim)) 45%,
+      rgb(var(--cb-veil-rgb) / min(0.97, calc(var(--cb-dim) + 0.38))) 100%),
+    var(--cb-image) !important;
+  background-size: cover, var(--cb-size) !important;
+  background-position: center, var(--cb-position) !important;
+  background-repeat: no-repeat !important;
+  background-attachment: fixed !important;
+}
+
+/* The page refused the picture (see `claude-backdrop status`): quiet Ayu
+ * gradient rather than a flat fill. */
+html[data-cb-noimage] {
+  background-image:
+    radial-gradient(130% 90% at 50% 0%, rgb(230 180 80 / 0.06), transparent 60%),
+    linear-gradient(to bottom, #0f131a, #0b0e14) !important;
+}
+
+/* ---------------------------------------------------------------- 2. see-through layout */
+
+body, #root, #__next,
+.dframe-root, .dframe-content, .dframe-content-inner, .dframe-main, main,
+.epitaxy-root, .epitaxy-chat-panel, .epitaxy-chat-panel-body, .epitaxy-titlebar,
+[data-cb-clear] {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+/* The same surfaces via the tokens the app paints them with. */
+:root, body, [data-mode], .cds-root, .dframe-root, .dframe-content, .epitaxy-root {
+  --df-bg-page: transparent !important;
+  --df-surface-primary: transparent !important;
+  --surface-primary: transparent !important;
+  --surface-primary-elevated: rgb(var(--cb-panel-rgb) / 0.75) !important;
+  --cds-page-bg: transparent !important;
+  --cds-surface-0: transparent !important;
+  --df-sidebar-bg: rgb(var(--cb-panel-rgb) / var(--cb-glass)) !important;
+  --df-bg-sidebar: rgb(var(--cb-panel-rgb) / var(--cb-glass)) !important;
+  --df-web-sidebar-bg: rgb(var(--cb-panel-rgb) / var(--cb-glass)) !important;
+  --df-hover: rgb(230 180 80 / 0.1) !important;
+  --df-selected: rgb(230 180 80 / 0.16) !important;
+  /* the composer already blurs what is behind it: just make it see-through */
+  --surface-prompt-blur: rgb(var(--cb-field-rgb) / var(--cb-field-alpha)) !important;
+  --surface-prompt-focus-hover: rgb(var(--cb-field-rgb) / calc(var(--cb-field-alpha) + 0.05)) !important;
+  --prompt-compact-bg: rgb(var(--cb-field-rgb) / var(--cb-field-alpha)) !important;
+  --prompt-compact-bg-focus: rgb(var(--cb-field-rgb) / calc(var(--cb-field-alpha) + 0.05)) !important;
+}
+
+/* Transcript top/bottom fades were painted in the page colour; over a picture
+ * they would show as bands. */
+.epitaxy-top-scrim {
+  background: linear-gradient(rgb(var(--cb-veil-rgb) / 0.5), transparent) !important;
+}
+.epitaxy-bottom-scrim {
+  background: linear-gradient(transparent, rgb(var(--cb-veil-rgb) / 0.5)) !important;
+}
+.scroll-fade-strip-top,
+.scroll-fade-strip-bottom {
+  display: none !important;
+}
+
+/* ---------------------------------------------------------------- 3. frosted glass */
+
+/* Sidebar and tall side panels: Ayu panel tint + blur. */
+.dframe-sidebar,
+[data-cb-glass="panel"] {
+  background-color: rgb(var(--cb-panel-rgb) / var(--cb-glass)) !important;
+  background-image: none !important;
+  -webkit-backdrop-filter: blur(var(--cb-blur)) saturate(1.15) !important;
+  backdrop-filter: blur(var(--cb-blur)) saturate(1.15) !important;
+}
+
+/* Composer frame (only when the page script had to find it by shape; normally
+ * the --surface-prompt-* tokens above already recolour it). */
+[data-cb-glass="field"] {
+  background-color: rgb(var(--cb-field-rgb) / var(--cb-field-alpha)) !important;
+  background-image: none !important;
+  -webkit-backdrop-filter: blur(var(--cb-blur)) saturate(1.3) !important;
+  backdrop-filter: blur(var(--cb-blur)) saturate(1.3) !important;
+  box-shadow: inset 0 0 0 1px var(--cb-edge) !important;
+}
+
+/* Text cursor and selection follow Ayu. */
+input, textarea, select, [contenteditable="true"], .ProseMirror {
+  caret-color: var(--ayu-accent) !important;
+}
+::selection {
+  background: rgb(230 180 80 / 0.28) !important;
+  color: var(--ayu-fg) !important;
+}

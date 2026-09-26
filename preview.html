@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>claude-backdrop — aperçu</title>
+<!--
+  Maquette autonome du rendu de claude-backdrop (image de fond + Ayu Dark).
+  Ce n'est PAS l'app : c'est une reconstruction fidèle de l'écran « New session »
+  avec les mêmes couleurs, voile et effet verre que src/theme.css, pour voir le
+  résultat sans rien installer. Le tableau est chargé depuis Wikimedia Commons
+  (domaine public) ; hors ligne, un dégradé Ayu prend le relais.
+-->
+<style>
+  :root {
+    /* Ayu Dark — identique à src/theme.css */
+    --ayu-bg: #0b0e14;
+    --ayu-panel: #0d1017;
+    --ayu-line: #11151c;
+    --ayu-fg: #bfbdb6;
+    --ayu-fg-dim: #acb6bf;
+    --ayu-muted: #8a9199;
+    --ayu-accent: #e6b450;
+    --ayu-orange: #ff8f40;
+    --ayu-blue: #59c2ff;
+    --ayu-green: #aad94c;
+
+    --dim: 0.5;
+    --glass: 0.55;
+    --blur: 18px;
+    --veil: 11 14 20;
+    --panel: 13 16 23;
+    --field: 15 20 28;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    color: var(--ayu-fg);
+    background: #7f8b98;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+  }
+
+  /* fenêtre façon macOS */
+  .window {
+    width: min(1100px, 100%);
+    aspect-ratio: 16 / 10;
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 30px 80px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(0 0 0 / 0.4);
+    position: relative;
+    isolation: isolate;
+    color: var(--ayu-fg);
+
+    /* la peinture derrière + le voile Ayu, comme html{} dans theme.css */
+    background-color: var(--ayu-bg);
+    background-image:
+      linear-gradient(to bottom,
+        rgb(var(--veil) / calc(var(--dim) * 0.55)) 0%,
+        rgb(var(--veil) / var(--dim)) 45%,
+        rgb(var(--veil) / min(0.97, calc(var(--dim) + 0.38))) 100%),
+      var(--painting);
+    background-size: cover, cover;
+    background-position: center, center 28%;
+    background-repeat: no-repeat;
+    --painting: url("https://commons.wikimedia.org/wiki/Special:FilePath/David_-_The_Death_of_Socrates.jpg?width=1600");
+  }
+
+  /* barre de titre */
+  .titlebar {
+    height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 14px;
+    background: rgb(var(--panel) / 0.35);
+    -webkit-backdrop-filter: blur(var(--blur)) saturate(1.15);
+    backdrop-filter: blur(var(--blur)) saturate(1.15);
+    border-bottom: 1px solid rgb(191 189 182 / 0.06);
+  }
+  .traffic { display: flex; gap: 8px; }
+  .traffic i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+  .traffic .r { background: #ff5f57; }
+  .traffic .y { background: #febc2e; }
+  .traffic .g { background: #28c840; }
+  .grid-btn { color: var(--ayu-muted); margin-left: 4px; }
+  .tab {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 5px 12px; border-radius: 8px;
+    background: rgb(var(--panel) / 0.5);
+    box-shadow: inset 0 0 0 1px rgb(191 189 182 / 0.08);
+    color: var(--ayu-fg-dim); font-size: 13px;
+  }
+  .tab .x { color: var(--ayu-muted); }
+
+  /* corps : logo, champ, méta */
+  .body {
+    position: absolute; inset: 44px 0 0 0;
+    display: grid; grid-template-rows: 1fr auto 1fr;
+    align-items: center; justify-items: center;
+    padding: 0 48px;
+  }
+  .logo {
+    grid-row: 2;
+    align-self: end;
+    margin-bottom: 26px;
+    font-weight: 800;
+    font-size: clamp(38px, 7vw, 78px);
+    letter-spacing: 2px;
+    color: rgb(191 189 182 / 0.9);
+    text-shadow: 0 2px 30px rgb(0 0 0 / 0.5);
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  }
+
+  /* le champ de saisie — verre dépoli Ayu, comme --surface-prompt-* */
+  .composer {
+    grid-row: 2;
+    width: min(620px, 100%);
+    border-radius: 16px;
+    padding: 16px 16px 12px;
+    background: rgb(var(--field) / var(--glass));
+    -webkit-backdrop-filter: blur(var(--blur)) saturate(1.3);
+    backdrop-filter: blur(var(--blur)) saturate(1.3);
+    box-shadow: inset 0 0 0 1px rgb(230 180 80 / 0.14), 0 10px 40px rgb(0 0 0 / 0.35);
+  }
+  .composer .ph { color: var(--ayu-muted); font-size: 15px; }
+  .composer .row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 22px;
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    color: var(--ayu-fg-dim); font-size: 13px;
+  }
+  .pill .plus {
+    width: 22px; height: 22px; border-radius: 6px;
+    display: grid; place-items: center;
+    background: rgb(191 189 182 / 0.08); color: var(--ayu-fg-dim);
+  }
+  .pill .dot { width: 16px; height: 16px; border-radius: 4px; background: var(--ayu-blue); opacity: .85; }
+  .send {
+    width: 30px; height: 30px; border-radius: 9px;
+    display: grid; place-items: center;
+    background: rgb(230 180 80 / 0.18); color: var(--ayu-accent);
+    box-shadow: inset 0 0 0 1px rgb(230 180 80 / 0.3);
+  }
+
+  /* ligne méta sous le champ */
+  .meta {
+    grid-row: 3;
+    align-self: start;
+    margin-top: 22px;
+    display: flex; gap: 18px; align-items: center;
+    color: var(--ayu-fg-dim); font-size: 13px;
+  }
+  .meta .item { display: inline-flex; align-items: center; gap: 7px; }
+  .meta .chip { width: 16px; height: 16px; border-radius: 5px; background: var(--ayu-accent); }
+  .meta .muted { color: var(--ayu-muted); }
+  .help {
+    position: absolute; right: 16px; bottom: 14px;
+    width: 26px; height: 26px; border-radius: 50%;
+    display: grid; place-items: center; color: var(--ayu-muted);
+    box-shadow: inset 0 0 0 1px rgb(191 189 182 / 0.12);
+  }
+
+  .note {
+    margin-top: 16px; color: #e8ecf1; text-align: center; max-width: 720px;
+    font-size: 13px; opacity: .9;
+  }
+  .swatches { display: flex; gap: 8px; justify-content: center; margin-top: 10px; }
+  .swatches i { width: 26px; height: 26px; border-radius: 7px; box-shadow: 0 1px 4px rgb(0 0 0 / .3); }
+</style>
+</head>
+<body>
+  <div class="window" role="img" aria-label="Aperçu de Claude Desktop avec image de fond et thème Ayu Dark">
+    <div class="titlebar">
+      <div class="traffic"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+      <span class="grid-btn" aria-hidden="true">⊞</span>
+      <span class="tab">◫ New session <span class="x">×</span></span>
+    </div>
+    <div class="body">
+      <div class="logo">claude</div>
+      <div class="composer">
+        <div class="ph">Ask anything, / for commands, @ for context…</div>
+        <div class="row">
+          <span class="pill"><span class="plus">+</span> <span class="dot"></span> Opus 5.5</span>
+          <span class="send">↑</span>
+        </div>
+      </div>
+      <div class="meta">
+        <span class="item"><span class="chip"></span> claude-backdrop <span class="muted">▾</span></span>
+        <span class="item muted">▢ Local ▾</span>
+        <span class="item muted">⑂ main</span>
+      </div>
+      <div class="help" aria-hidden="true">?</div>
+    </div>
+  </div>
+  <p class="note">
+    Aperçu de <strong>claude-backdrop</strong> — image de fond + interface Ayu Dark.
+    Reconstruction fidèle, pas une capture de l'app.
+  </p>
+  <div class="swatches" title="Palette Ayu Dark">
+    <i style="background:#0b0e14"></i>
+    <i style="background:#0d1017"></i>
+    <i style="background:#bfbdb6"></i>
+    <i style="background:#e6b450"></i>
+    <i style="background:#59c2ff"></i>
+    <i style="background:#aad94c"></i>
+    <i style="background:#ff8f40"></i>
+    <i style="background:#d95757"></i>
+  </div>
+</body>
+</html>

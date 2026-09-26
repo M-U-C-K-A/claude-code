@@ -1,0 +1,26 @@
+{
+  "name": "claude-backdrop",
+  "version": "1.0.0",
+  "description": "Une image de fond (et un effet verre dépoli, palette Ayu Dark) derrière Claude Desktop sur macOS.",
+  "type": "module",
+  "bin": {
+    "claude-backdrop": "src/cli.mjs"
+  },
+  "files": [
+    "claude-backdrop",
+    "src"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin"
+  ],
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@electron/asar": "^4.0.1"
+  }
+}
