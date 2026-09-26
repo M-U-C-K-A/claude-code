@@ -63,42 +63,92 @@
       return path.isAbsolute(p) ? p : path.join(DIR, p);
     };
 
-    function varsCss(cfg, imageUrl) {
-      const dim = clamp(cfg.dim, 0.45, 0, 0.95);
+    // Read a picture off disk and turn it into a data: URL, or "" if unusable.
+    function dataUrl(file) {
+      try {
+        if (fs.statSync(file).size > MAX_IMAGE_BYTES) return "";
+        const mime = MIME[path.extname(file).toLowerCase()] || "image/jpeg";
+        return `data:${mime};base64,${fs.readFileSync(file).toString("base64")}`;
+      } catch {
+        return "";
+      }
+    }
+
+    // The gallery on disk: <DIR>/gallery/<id>.jpg, each tagged dark/light by the
+    // manifest that `claude-backdrop` writes next to them. The page picks one
+    // per conversation, matching the current light/dark mode.
+    function gallery() {
+      let manifest = [];
+      try {
+        manifest = JSON.parse(fs.readFileSync(file(path.join("gallery", "manifest.json")), "utf8"));
+      } catch {}
+      const out = [];
+      for (const entry of Array.isArray(manifest) ? manifest : []) {
+        const url = dataUrl(file(path.join("gallery", `${entry.id}.jpg`)));
+        if (url) out.push({ id: entry.id, mode: entry.mode === "light" ? "light" : "dark", url });
+      }
+      return out;
+    }
+
+    function stableTokens(cfg) {
+      const dim = clamp(cfg.dim, 0.55, 0, 0.95);
       const glass = clamp(cfg.glass, 0.5, 0, 1);
-      const blur = clamp(cfg.blur, 18, 0, 80);
+      const blur = clamp(cfg.blur, 22, 0, 80);
+      const imageBlur = clamp(cfg.imageBlur, 6, 0, 60);
       const position = typeof cfg.position === "string" && /^[a-z0-9 .%-]{1,40}$/i.test(cfg.position) ? cfg.position : "center";
       const size = typeof cfg.size === "string" && /^(cover|contain|auto|\d{1,4}(\.\d+)?(px|%))$/.test(cfg.size) ? cfg.size : "cover";
-      let css = `:root{--cb-image:${imageUrl ? `url("${imageUrl}")` : "none"};--cb-dim:${dim};--cb-glass:${glass};--cb-blur:${blur}px;--cb-position:${position};--cb-size:${size}}`;
+      let css = `:root{--cb-dim:${dim};--cb-glass:${glass};--cb-blur:${blur}px;--cb-image-blur:${imageBlur}px;--cb-position:${position};--cb-size:${size}}`;
       if (blur === 0) css += "\n.dframe-sidebar,[data-cb-glass]{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}";
       return css;
     }
 
-    // Everything to inject, rebuilt only when one of the files changed.
+    // Everything to inject, rebuilt only when a file changed. The chosen image
+    // is left to the page script (it knows the conversation and the mode); the
+    // loader just hands it the fixed image and the gallery.
     let cache = null;
     function build() {
       const cfg = readConfig();
       const picture = imagePath(cfg);
-      const key = [stamp(file("config.json")), stamp(file("theme.css")), stamp(file("custom.css")), picture, stamp(picture)].join("|");
+      const galleryDir = file("gallery");
+      const key = [
+        stamp(file("config.json")),
+        stamp(file("theme.css")),
+        stamp(file("custom.css")),
+        picture,
+        stamp(picture),
+        stamp(path.join(galleryDir, "manifest.json")),
+      ].join("|");
       if (cache && cache.key === key) return cache;
       const enabled = cfg.enabled !== false;
       let css = "";
       let image = "off";
+      let page = { version: VERSION };
       if (enabled) {
-        let url = "";
-        try {
-          const size = fs.statSync(picture).size;
-          if (size > MAX_IMAGE_BYTES) image = "too-large";
-          else {
-            url = `data:${MIME[path.extname(picture).toLowerCase()] || "image/jpeg"};base64,${fs.readFileSync(picture).toString("base64")}`;
-            image = "loaded";
-          }
-        } catch {
-          image = "missing";
-        }
-        css = `${readText(file("theme.css"))}\n${varsCss(cfg, url)}\n${readText(file("custom.css"))}`;
+        const fixed = dataUrl(picture);
+        const rotate = cfg.rotate === "off" ? "off" : "conversation";
+        const gal = rotate === "off" ? [] : gallery();
+        image =
+          rotate === "off"
+            ? fixed
+              ? "loaded"
+              : fs.existsSync(picture)
+                ? "too-large"
+                : "missing"
+            : gal.length
+              ? `gallery(${gal.length})`
+              : fixed
+                ? "loaded"
+                : "missing";
+        page = {
+          version: VERSION,
+          mode: cfg.mode || "dark",
+          autoClear: cfg.autoClear !== false,
+          rotate,
+          fixed,
+          gallery: gal,
+        };
+        css = `${readText(file("theme.css"))}\n${stableTokens(cfg)}\n${readText(file("custom.css"))}`;
       }
-      const page = { version: VERSION, mode: cfg.mode, autoClear: cfg.autoClear !== false };
       cache = { key, enabled, css, image, page };
       return cache;
     }

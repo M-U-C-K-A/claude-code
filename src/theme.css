@@ -38,11 +38,13 @@
   --ayu-red: #d95757;         /* danger */
   --ayu-purple: #d2a6ff;      /* pro / accent-2 */
 
-  /* control knobs (the loader overrides these from config.json) */
+  /* control knobs (the loader overrides these from config.json; --cb-image is
+   * set per page by the page script) */
   --cb-image: none;
-  --cb-dim: 0.5;
-  --cb-glass: 0.55;
-  --cb-blur: 18px;
+  --cb-dim: 0.55;
+  --cb-glass: 0.5;
+  --cb-blur: 22px;
+  --cb-image-blur: 6px;
   --cb-position: center;
   --cb-size: cover;
 
@@ -170,28 +172,51 @@ body,
 
 /* ---------------------------------------------------------------- 1. the picture */
 
-/* Painted on the canvas, behind everything. Lighter veil at the top, heavier at
- * the bottom, like the reference: the picture reads, the UI stays legible. */
+/* Fallback colour behind everything. */
 html {
   background-color: var(--cb-fallback) !important;
-  background-image:
-    linear-gradient(to bottom,
-      rgb(var(--cb-veil-rgb) / calc(var(--cb-dim) * 0.55)) 0%,
-      rgb(var(--cb-veil-rgb) / var(--cb-dim)) 45%,
-      rgb(var(--cb-veil-rgb) / min(0.97, calc(var(--cb-dim) + 0.38))) 100%),
-    var(--cb-image) !important;
-  background-size: cover, var(--cb-size) !important;
-  background-position: center, var(--cb-position) !important;
-  background-repeat: no-repeat !important;
-  background-attachment: fixed !important;
+}
+
+/* The picture, on a fixed full-window layer behind the app (the app's own
+ * surfaces are made transparent below). On its own layer so it can be blurred
+ * (--cb-image-blur) without touching the text; scaled a touch so the blur has
+ * no transparent edges. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background-image: var(--cb-image);
+  background-size: var(--cb-size);
+  background-position: var(--cb-position);
+  background-repeat: no-repeat;
+  filter: blur(var(--cb-image-blur));
+  transform: scale(1.06);
+}
+
+/* The dark veil over the picture: lighter at the top, heavier at the bottom,
+ * like the reference, so the picture reads and the UI stays legible. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(to bottom,
+    rgb(var(--cb-veil-rgb) / calc(var(--cb-dim) * 0.55)) 0%,
+    rgb(var(--cb-veil-rgb) / var(--cb-dim)) 45%,
+    rgb(var(--cb-veil-rgb) / min(0.97, calc(var(--cb-dim) + 0.38))) 100%);
 }
 
 /* The page refused the picture (see `claude-backdrop status`): quiet Ayu
  * gradient rather than a flat fill. */
-html[data-cb-noimage] {
+html[data-cb-noimage] body::before {
   background-image:
     radial-gradient(130% 90% at 50% 0%, rgb(230 180 80 / 0.06), transparent 60%),
     linear-gradient(to bottom, #0f131a, #0b0e14) !important;
+  filter: none;
+  transform: none;
 }
 
 /* ---------------------------------------------------------------- 2. see-through layout */
@@ -246,6 +271,24 @@ body, #root, #__next,
   background-image: none !important;
   -webkit-backdrop-filter: blur(var(--cb-blur)) saturate(1.15) !important;
   backdrop-filter: blur(var(--cb-blur)) saturate(1.15) !important;
+}
+
+/* Terminal (Claude Code): frost the pane behind it, and make the xterm layers
+ * see-through so the picture shows through the empty cells while coloured
+ * output keeps its own colours. A touch more opaque than the sidebar, for
+ * readability. */
+[data-cb-glass="term"] {
+  background-color: rgb(var(--cb-panel-rgb) / calc(var(--cb-glass) + 0.22)) !important;
+  background-image: none !important;
+  -webkit-backdrop-filter: blur(var(--cb-blur)) saturate(1.1) !important;
+  backdrop-filter: blur(var(--cb-blur)) saturate(1.1) !important;
+}
+[data-cb-term],
+[data-cb-term] .xterm-viewport,
+[data-cb-term] .xterm-screen,
+[data-cb-term] .xterm-rows,
+[data-cb-term] .xterm-decoration-container {
+  background-color: transparent !important;
 }
 
 /* Composer frame (only when the page script had to find it by shape; normally

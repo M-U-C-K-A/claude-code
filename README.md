@@ -65,17 +65,34 @@ Pour partir d'une autre image tout de suite :
 ## Au quotidien
 
 ```bash
-./claude-backdrop image ~/Images/autre.jpg   # change l'image (fichier, URL, ou "socrate")
-./claude-backdrop set dim 0.6                 # assombrit plus l'image (0 à 0.95)
-./claude-backdrop set glass 0.4               # panneaux plus transparents (0 à 1)
-./claude-backdrop set blur 24                 # flou du verre en px (0 = sans flou)
-./claude-backdrop set position "50% 20%"      # recadre l'image
-./claude-backdrop set                         # liste tous les réglages
-./claude-backdrop off                         # coupe le thème (loader gardé)
-./claude-backdrop on                          # le remet
-./claude-backdrop status                      # état du patch, signature, thème
-./claude-backdrop doctor                      # relance l'analyse et liste les calques opaques restants
+./claude-backdrop gallery                     # les tableaux + (ré)active l'image au hasard par conversation
+./claude-backdrop image ~/Images/autre.jpg    # fixe une image (fichier, URL, ou un id de la galerie) → coupe la rotation
+./claude-backdrop set dim 0.65                 # assombrit plus l'image (0 à 0.95)
+./claude-backdrop set imageblur 12             # floute l'image de fond (0 à 60 px)
+./claude-backdrop set glass 0.4                # panneaux plus transparents (0 à 1)
+./claude-backdrop set blur 24                  # flou du verre en px (0 = sans flou)
+./claude-backdrop set rotate off               # image fixe au lieu d'une par conversation
+./claude-backdrop set                          # liste tous les réglages
+./claude-backdrop off                          # coupe le thème (loader gardé)
+./claude-backdrop on                           # le remet
+./claude-backdrop status                       # état du patch, signature, thème
+./claude-backdrop doctor                       # relance l'analyse et liste les calques opaques restants
 ```
+
+### Galerie et image par conversation
+
+Par défaut, **chaque conversation reçoit un tableau au hasard**, stable pour
+cette conversation (un rechargement garde le même). Les tableaux sont choisis
+selon le mode : en **sombre**, *La Mort de Socrate*, *Le Serment des Horaces* ou
+*Pandemonium* ; en **clair**, *L'École d'Athènes*. Tous sont du domaine public.
+
+```bash
+./claude-backdrop gallery         # liste et télécharge les tableaux, active la rotation
+./claude-backdrop image socrates  # au contraire : une seule image fixe partout
+./claude-backdrop set rotate on   # revenir à une image par conversation
+```
+
+Ids de la galerie : `socrates`, `horatii`, `pandemonium`, `school-of-athens`.
 
 Tout se recharge en direct. Tes propres règles CSS vont dans
 `~/Library/Application Support/ClaudeBackdrop/custom.css` (jamais écrasé) ;
@@ -110,15 +127,17 @@ depuis [claude.ai/download](https://claude.ai/download).
 
 ## Réglages
 
-| Réglage    | Défaut   | Rôle |
-|------------|----------|------|
-| `dim`      | `0.5`    | assombrissement de l'image (0 à 0.95) |
-| `glass`    | `0.55`   | opacité du verre (barre latérale, panneaux), 0 à 1 |
-| `blur`     | `18`     | flou du verre en px (0 = sans flou) |
-| `position` | `center` | cadrage : `center`, `top`, `50% 20%`… |
-| `size`     | `cover`  | `cover` (remplit) ou `contain` |
-| `mode`     | `dark`   | `dark`, `light` ou `auto` (suit le thème de Claude) |
-| `autoClear`| `true`   | détection automatique des calques opaques |
+| Réglage     | Défaut          | Rôle |
+|-------------|-----------------|------|
+| `rotate`    | `conversation`  | `on` = une image au hasard par conversation ; `off` = image fixe |
+| `dim`       | `0.55`          | assombrissement de l'image (0 à 0.95) |
+| `imageblur` | `6`             | flou de l'image de fond en px (0 à 60) |
+| `glass`     | `0.5`           | opacité du verre (barre latérale, panneaux, terminal), 0 à 1 |
+| `blur`      | `22`            | flou du verre en px (0 = sans flou) |
+| `position`  | `center`        | cadrage : `center`, `top`, `50% 20%`… |
+| `size`      | `cover`         | `cover` (remplit) ou `contain` |
+| `mode`      | `dark`          | `dark`, `light` ou `auto` (suit le thème de Claude) |
+| `autoClear` | `true`          | détection automatique des calques opaques (barre latérale, terminal…) |
 
 ## Sécurité et limites
 

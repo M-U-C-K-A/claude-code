@@ -9,7 +9,7 @@ import readline from "node:readline/promises";
 import vm from "node:vm";
 import { inspectAsar, patchAsar, unpatchAsar, verifyAsar } from "./asar.mjs";
 import { SRC, VERSION, buildLoader } from "./build.mjs";
-import { DEFAULT_IMAGE, download, store } from "./image.mjs";
+import { GALLERY, download, galleryEntry, store, syncGallery } from "./image.mjs";
 import * as mac from "./macos.mjs";
 
 const SUPPORT = process.env.CLAUDE_BACKDROP_DIR || path.join(os.homedir(), "Library", "Application Support", "ClaudeBackdrop");
@@ -21,9 +21,11 @@ const DEFAULT_APP = "/Applications/Claude.app";
 const DEFAULTS = {
   enabled: true,
   image: "background.jpg",
-  dim: 0.45,
+  rotate: "conversation", // "conversation" = une image au hasard par conversation ; "off" = image fixe
+  dim: 0.55,
   glass: 0.5,
-  blur: 18,
+  blur: 22,
+  imageBlur: 6,
   position: "center",
   size: "cover",
   mode: "dark",
@@ -139,13 +141,44 @@ function currentImage() {
   return fs.existsSync(file) ? file : null;
 }
 
+// Rewrite gallery/manifest.json from whichever paintings actually downloaded,
+// so the loader offers only the ones present, each with its light/dark tag.
+function writeGalleryManifest() {
+  const galleryDir = path.join(SUPPORT, "gallery");
+  const manifest = GALLERY.filter((entry) => fs.existsSync(path.join(galleryDir, `${entry.id}.jpg`))).map((entry) => ({
+    id: entry.id,
+    mode: entry.mode,
+    title: entry.title,
+  }));
+  fs.mkdirSync(galleryDir, { recursive: true });
+  fs.writeFileSync(path.join(galleryDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  return manifest;
+}
+
+// Download the gallery (idempotent) and refresh the manifest.
+async function ensureGallery(force = false) {
+  fs.mkdirSync(SUPPORT, { recursive: true, mode: 0o700 });
+  const results = await syncGallery(SUPPORT, { force, onStep: (e) => step(`Téléchargement : ${e.title}`) });
+  const manifest = writeGalleryManifest();
+  for (const r of results.filter((r) => r.status === "failed")) {
+    warn(`Tableau indisponible (${r.id}) : ${r.error}`);
+  }
+  return manifest;
+}
+
+// Set a FIXED background image (turns rotation off): a gallery id, a file, or a URL.
 async function setImage(spec) {
   let input;
   let label = spec;
-  if (!spec || ["socrate", "socrates", "defaut", "défaut", "default"].includes(spec.toLowerCase())) {
-    step(`Téléchargement de l'image par défaut : ${DEFAULT_IMAGE.title}`);
-    input = await download(DEFAULT_IMAGE.sources);
-    label = DEFAULT_IMAGE.title;
+  const entry = spec && galleryEntry(spec.toLowerCase());
+  if (!spec || ["socrate", "socrates", "defaut", "défaut", "default"].includes(String(spec).toLowerCase())) {
+    step(`Téléchargement de l'image par défaut : ${GALLERY[0].title}`);
+    input = await download(GALLERY[0].sources);
+    label = GALLERY[0].title;
+  } else if (entry) {
+    step(`Téléchargement : ${entry.title}`);
+    input = await download(entry.sources);
+    label = entry.title;
   } else if (/^https?:\/\//i.test(spec)) {
     step(`Téléchargement de ${spec}`);
     input = await download([spec]);
@@ -155,9 +188,10 @@ async function setImage(spec) {
   }
   fs.mkdirSync(SUPPORT, { recursive: true, mode: 0o700 });
   const saved = store(input, SUPPORT);
-  writeConfig({ ...DEFAULTS, ...readConfig(), image: saved.name });
+  writeConfig({ ...DEFAULTS, ...readConfig(), image: saved.name, rotate: "off" });
   const size = saved.size ? `${saved.size[0]}×${saved.size[1]}, ` : "";
-  ok(`Image de fond : ${label} ${dim(`(${size}${Math.round(saved.bytes / 1024)} Ko)`)}`);
+  ok(`Image fixe : ${label} ${dim(`(${size}${Math.round(saved.bytes / 1024)} Ko)`)}`);
+  say(dim("Rotation par conversation désactivée. Pour la réactiver : claude-backdrop set rotate on"));
 }
 
 // ---------------------------------------------------------------- app state
@@ -266,7 +300,13 @@ async function cmdInstall(opts) {
   step("Fichiers du thème");
   ensureSupport();
   if (opts.image) await setImage(opts.image);
-  else if (!currentImage()) {
+  const cfg = { ...DEFAULTS, ...readConfig() };
+  if (cfg.rotate !== "off") {
+    step("Galerie de tableaux (une image au hasard par conversation)");
+    const manifest = await ensureGallery();
+    if (!manifest.length) warn("Aucun tableau téléchargé ; le thème marche, mais sans rotation. Réessaie : claude-backdrop gallery");
+    else ok(`${manifest.length} tableau(x) prêt(s) : ${manifest.map((m) => m.id).join(", ")}`);
+  } else if (!currentImage()) {
     try {
       await setImage("socrate");
     } catch (error) {
@@ -407,15 +447,38 @@ async function cmdRestore(opts) {
 }
 
 async function cmdImage(opts) {
-  if (!opts._[1]) fail("Usage : claude-backdrop image <fichier | url | socrate>");
+  const ids = GALLERY.map((e) => e.id).join(", ");
+  if (!opts._[1]) fail(`Usage : claude-backdrop image <fichier | url | ${ids}>`);
   ensureSupport();
   await setImage(opts._[1]);
   say(dim("Claude recharge l'image tout seul (quelques secondes)."));
 }
 
+async function cmdGallery(opts) {
+  const sub = opts._[1];
+  say(bold("Galerie de tableaux") + dim("  (une image au hasard par conversation)"));
+  for (const entry of GALLERY) {
+    const present = fs.existsSync(path.join(SUPPORT, "gallery", `${entry.id}.jpg`));
+    const tag = entry.mode === "light" ? yellow("clair") : dim("sombre");
+    say(`  ${present ? green("●") : dim("○")} ${entry.id.padEnd(16)} ${tag}  ${dim(entry.title)}`);
+  }
+  if (sub === "list") return;
+  if (sub && sub !== "sync") fail("Usage : claude-backdrop gallery [sync]");
+  ensureSupport();
+  say();
+  const manifest = await ensureGallery(sub === "sync");
+  writeConfig({ ...DEFAULTS, ...readConfig(), rotate: "conversation" });
+  ok(`Rotation activée, ${manifest.length} tableau(x) disponible(s).`);
+}
+
 const SETTINGS = {
+  rotate: {
+    help: "on = une image au hasard par conversation ; off = image fixe",
+    parse: (v) => ({ on: "conversation", conversation: "conversation", off: "off", fixe: "off" })[v] ?? null,
+  },
   dim: { help: "assombrissement de l'image, 0 à 0.95", parse: (v) => number(v, 0, 0.95) },
-  glass: { help: "opacité du verre (barre latérale, panneaux), 0 à 1", parse: (v) => number(v, 0, 1) },
+  imageblur: { help: "flou de l'image de fond en px, 0 à 60", parse: (v) => number(v, 0, 60), key: "imageBlur" },
+  glass: { help: "opacité du verre (barre latérale, panneaux, terminal), 0 à 1", parse: (v) => number(v, 0, 1) },
   blur: { help: "flou du verre en px, 0 à 80 (0 = sans flou)", parse: (v) => number(v, 0, 80) },
   position: { help: "cadrage : center, top, bottom, « 50% 30% »…", parse: (v) => (/^[a-z0-9 .%-]{1,40}$/i.test(v) ? v : null) },
   size: { help: "cover (remplit la fenêtre) ou contain", parse: (v) => (["cover", "contain"].includes(v) ? v : null) },
@@ -433,16 +496,18 @@ function cmdSet(opts) {
   const cfg = { ...DEFAULTS, ...readConfig() };
   if (!key) {
     say(bold("Réglages") + dim(`  (${CONFIG})`));
-    for (const [name, spec] of Object.entries(SETTINGS)) say(`  ${name.padEnd(10)} ${String(cfg[name]).padEnd(8)} ${dim(spec.help)}`);
+    for (const [name, spec] of Object.entries(SETTINGS)) {
+      say(`  ${name.padEnd(10)} ${String(cfg[spec.key || name]).padEnd(12)} ${dim(spec.help)}`);
+    }
     say(dim("\nExemple : claude-backdrop set dim 0.6"));
     return;
   }
-  const spec = SETTINGS[key];
+  const spec = SETTINGS[key.toLowerCase()];
   if (!spec) fail(`Réglage inconnu : ${key}. Possibles : ${Object.keys(SETTINGS).join(", ")}`);
-  const value = spec.parse(rest.join(" "));
+  const value = spec.parse(rest.join(" ").trim());
   if (value === null || value === undefined || rest.length === 0) fail(`Valeur invalide pour ${key} : ${spec.help}`);
   ensureSupport();
-  writeConfig({ ...cfg, [key]: value });
+  writeConfig({ ...cfg, [spec.key || key.toLowerCase()]: value });
   ok(`${key} = ${value} ${dim("(appliqué en direct)")}`);
 }
 
@@ -469,8 +534,9 @@ function printPages(status) {
   say(`  rapport du loader ${status.loader}, il y a ${age} s — image ${status.image}, thème ${status.enabled ? "actif" : "désactivé"}`);
   for (const page of status.pages || []) {
     const p = page.page || {};
-    const image = { data: green("affichée"), blob: green("affichée (blob)"), blocked: red("bloquée par la CSP"), none: yellow("aucune") }[p.image] || p.image || "?";
-    say(`  • ${page.url}  css ${page.css === "inserted" ? green("ok") : red(page.css)}  image ${image}  calques rendus transparents ${p.cleared ?? "?"}  en verre ${p.glass ?? "?"}`);
+    const image = { data: green("affichée"), blob: green("affichée (blob)"), url: green("affichée"), blocked: red("bloquée par la CSP"), none: yellow("aucune") }[p.image] || p.image || "?";
+    say(`  • ${page.url}  css ${page.css === "inserted" ? green("ok") : red(page.css)}  image ${image}${p.painting && p.painting !== "none" ? dim(` [${p.painting}]`) : ""}`);
+    say(`    ${dim(`mode ${p.mode ?? "?"} · transparents ${p.cleared ?? "?"} · verre ${p.glass ?? "?"} · terminaux ${p.terminals ?? 0}`)}`);
     if (page.error) say(`    ${red(page.error)}`);
     for (const layer of (p.opaque || []).slice(0, 6)) {
       const name = `${layer.tag}${layer.id ? `#${layer.id}` : ""}${layer.class ? `.${layer.class.split(" ").join(".")}` : ""}`;
@@ -498,10 +564,16 @@ function cmdStatus(opts) {
     say(`  ${dim(`Claude Desktop introuvable (${app})`)}`);
   }
   const cfg = { ...DEFAULTS, ...readConfig() };
+  const galleryDir = path.join(SUPPORT, "gallery");
+  const present = GALLERY.filter((e) => fs.existsSync(path.join(galleryDir, `${e.id}.jpg`))).map((e) => e.id);
   const image = currentImage();
   say(`  dossier       ${SUPPORT}`);
-  say(`  image         ${image ? `${path.basename(image)} (${Math.round(fs.statSync(image).size / 1024)} Ko)` : yellow("aucune")}`);
-  say(`  réglages      ${Object.keys(SETTINGS).map((k) => `${k}=${cfg[k]}`).join("  ")}${cfg.enabled ? "" : yellow("  (désactivé)")}`);
+  if (cfg.rotate !== "off") {
+    say(`  images        ${green("rotation par conversation")} — ${present.length ? present.join(", ") : yellow("galerie vide (claude-backdrop gallery)")}`);
+  } else {
+    say(`  image         ${green("fixe")} — ${image ? `${path.basename(image)} (${Math.round(fs.statSync(image).size / 1024)} Ko)` : yellow("aucune")}`);
+  }
+  say(`  réglages      ${Object.keys(SETTINGS).map((k) => `${k}=${cfg[SETTINGS[k].key || k]}`).join("  ")}${cfg.enabled ? "" : yellow("  (désactivé)")}`);
   say(bold("Dans Claude"));
   printPages(readStatus());
 }
@@ -555,16 +627,18 @@ const HELP = `${bold("claude-backdrop")} — une image de fond derrière Claude 
 
   ${bold("install")} [--image <fichier|url>] [--app <chemin>] [--no-app-backup] [--yes]
       installe le loader dans Claude.app (sauvegarde, patch, signature locale, relance)
-  ${bold("image")} <fichier | url | socrate>     change l'image de fond, en direct
-  ${bold("set")} [<réglage> <valeur>]            règle dim, glass, blur, position, size, mode, autoClear
+  ${bold("image")} <fichier | url | id>          fixe une image (${GALLERY.map((e) => e.id).join(", ")}), coupe la rotation
+  ${bold("gallery")} [sync]                       galerie des tableaux + (ré)active l'image au hasard par conversation
+  ${bold("set")} [<réglage> <valeur>]            rotate, dim, imageblur, glass, blur, position, size, mode, autoClear
   ${bold("on")} | ${bold("off")}                             active / désactive le thème sans rien désinstaller
   ${bold("status")}                              état du patch, de la signature et du thème dans Claude
   ${bold("doctor")}                              relance l'analyse dans Claude et liste les calques opaques
-  ${bold("restore")} [--purge]                   remet Claude d'origine (--purge : supprime aussi réglages et image)
+  ${bold("restore")} [--purge]                   remet Claude d'origine (--purge : supprime aussi réglages et images)
   ${bold("selftest")} [--asar <fichier>]         essaie le patch sur une copie, sans rien modifier
 
 Fichiers : ${SUPPORT}
-  config.json, theme.css (remplacé à chaque install), custom.css (à toi), background.jpg`;
+  config.json, theme.css (remplacé à chaque install), custom.css (à toi),
+  background.jpg (image fixe), gallery/ (tableaux de la rotation)`;
 
 async function main() {
   const major = Number(process.versions.node.split(".")[0]);
@@ -575,6 +649,7 @@ async function main() {
   const commands = {
     install: () => cmdInstall(opts),
     image: () => cmdImage(opts),
+    gallery: () => cmdGallery(opts),
     set: () => cmdSet(opts),
     on: () => cmdToggle(true),
     off: () => cmdToggle(false),
