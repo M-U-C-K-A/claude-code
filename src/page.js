@@ -111,9 +111,10 @@ function items() {
     if (!g || ids.has(g.id) || urls.has(g.url)) continue;
     ids.add(g.id);
     urls.add(g.url);
-    out.push({ id: g.id, url: g.url, file: g.file, custom: /^custom-/.test(g.id) });
+    const custom = /^custom-/.test(g.id);
+    out.push({ id: g.id, url: g.url, file: g.file, custom, title: custom ? "Ajoutée" : g.title || g.id });
   }
-  if (CB.fixed && !urls.has(CB.fixed)) out.unshift({ id: "fixed", url: CB.fixed, fixed: true });
+  if (CB.fixed && !urls.has(CB.fixed)) out.unshift({ id: "fixed", url: CB.fixed, fixed: true, title: "Par défaut" });
   return out;
 }
 
@@ -387,11 +388,12 @@ function renderGrid() {
   gridEl.textContent = "";
   const cur = currentUrl();
   for (const it of items()) {
-    const cell = el("div", { className: "cb-thumb" });
+    const cell = el("button", { className: "cb-thumb", type: "button" });
     if (it.url === cur) cell.classList.add("cb-current");
     cell.style.backgroundImage = `url("${it.url}")`;
-    cell.title = it.fixed ? "Image par défaut" : it.custom ? "Ajoutée" : it.id;
+    cell.title = it.title || it.id;
     cell.onclick = () => pickHere(it.url, it.id);
+    cell.appendChild(el("span", { className: "cb-caption", textContent: it.title || it.id }));
     if (it.custom && it.file) {
       const del = el("button", { className: "cb-del", type: "button", title: "Retirer" });
       del.appendChild(svg(["M6 6l12 12M18 6L6 18"], 12));
@@ -407,23 +409,55 @@ function renderGrid() {
   // add tile
   const add = el("label", { className: "cb-thumb cb-add", title: "Ajouter une image" });
   add.appendChild(svg(["M12 5v14M5 12h14"], 22));
+  add.appendChild(el("span", { className: "cb-caption", textContent: "Ajouter" }));
   const input = el("input", { type: "file", accept: "image/*" });
   input.style.display = "none";
-  input.onchange = () => {
+  input.onchange = async () => {
     const f = input.files && input.files[0];
     if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = String(reader.result || "");
-      if (!url.startsWith("data:image/")) return;
-      const id = `custom-${Date.now().toString(36)}`;
-      sendCmd({ action: "add", id, name: f.name, dataUrl: url });
-      pickHere(url, id); // shows it now; survives the loader's re-inject via the id
-    };
-    reader.readAsDataURL(f);
+    let url;
+    try {
+      url = await downscale(f); // keep it small enough for the command channel
+    } catch {
+      return;
+    }
+    if (!url.startsWith("data:image/")) return;
+    const id = `custom-${Date.now().toString(36)}`;
+    sendCmd({ action: "add", id, name: f.name, dataUrl: url });
+    pickHere(url, id); // shows it now; survives the loader's re-inject via the id
   };
   add.appendChild(input);
   gridEl.appendChild(add);
+}
+
+// Read an image file and re-encode it as a JPEG no wider than 1920px. A raw
+// multi-MB file would overflow the localStorage command channel (and bloat
+// every injection); this keeps custom images light and reliable.
+function downscale(file, max = 1920, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("read"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("decode"));
+      img.onload = () => {
+        const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.max(1, Math.round(img.naturalWidth * scale));
+        const h = Math.max(1, Math.round(img.naturalHeight * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        try {
+          resolve(canvas.toDataURL("image/jpeg", quality));
+        } catch (e) {
+          reject(e);
+        }
+      };
+      img.src = String(reader.result || "");
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 // A labelled slider that live-updates a CSS var and persists via the loader.
@@ -462,8 +496,8 @@ function buildUI() {
   const settings = (CB.settings && typeof CB.settings === "object") ? CB.settings : {};
   const sliders = el("div", { className: "cb-sliders" });
   sliders.append(
-    slider("Opacité", "imageOpacity", "--cb-image-opacity", 0.1, 1, 0.05, settings.imageOpacity ?? 1, pct),
-    slider("Luminosité", "brightness", "--cb-brightness", 0.3, 1.6, 0.05, settings.brightness ?? 1, pct),
+    slider("Assombrissement", "dim", "--cb-dim", 0, 0.9, 0.05, settings.dim ?? 0.55, pct),
+    slider("Luminosité", "brightness", "--cb-brightness", 0.4, 1.6, 0.05, settings.brightness ?? 1, pct),
   );
 
   const foot = el("div", { className: "cb-foot" });

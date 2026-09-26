@@ -32,10 +32,9 @@ export const GALLERY = [
     id: "pandemonium",
     title: "Pandemonium — John Martin, 1841",
     sources: [
+      "search:John Martin Pandemonium 1841",
       commons("John_Martin_-_Pandemonium_-_Google_Art_Project.jpg"),
       commons("John_Martin_-_Pandemonium_-_WGA14140.jpg"),
-      commons("Pandemonium%2C_John_Martin.jpg"),
-      commons("John Martin - Pandemonium - WGA14140.jpg"),
     ],
   },
   {
@@ -43,7 +42,7 @@ export const GALLERY = [
     title: "L'École d'Athènes — Raphaël, 1511",
     sources: [
       commons("Raphael_School_of_Athens.jpg"),
-      commons('"The_School_of_Athens"_by_Raffaello_Sanzio_da_Urbino.jpg'),
+      "search:Raphael School of Athens Stanza",
     ],
   },
 ];
@@ -62,6 +61,26 @@ const EXTENSIONS = {
 };
 const MAX_RAW_BYTES = 24 * 1024 * 1024;
 
+// Resolve a Commons file-search into a real image URL: robust to exact
+// filenames (which drift), because it searches the File namespace by words.
+async function commonsSearch(query, width = 1800) {
+  const api =
+    `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*` +
+    `&generator=search&gsrnamespace=6&gsrlimit=8&gsrsearch=${encodeURIComponent(query)}` +
+    `&prop=imageinfo&iiprop=url&iiurlwidth=${width}`;
+  const res = await fetch(api, { headers: { "User-Agent": USER_AGENT } });
+  if (!res.ok) throw new Error(`recherche Commons : HTTP ${res.status}`);
+  const data = await res.json();
+  const pages = data && data.query && data.query.pages ? Object.values(data.query.pages) : [];
+  pages.sort((a, b) => (a.index || 99) - (b.index || 99));
+  for (const page of pages) {
+    const info = page.imageinfo && page.imageinfo[0];
+    const url = info && (info.thumburl || info.url);
+    if (url && /\.(jpe?g|png)$/i.test((info.url || url).split("?")[0])) return url;
+  }
+  throw new Error(`aucune image pour « ${query} »`);
+}
+
 async function fetchImage(source) {
   let url = source;
   if (url.startsWith("met:")) {
@@ -72,6 +91,8 @@ async function fetchImage(source) {
     const object = await api.json();
     url = object.primaryImage || object.primaryImageSmall;
     if (!url) throw new Error("API du Met : pas d'image");
+  } else if (url.startsWith("search:")) {
+    url = await commonsSearch(url.slice(7));
   }
   const response = await fetch(url, { headers: { "User-Agent": USER_AGENT }, redirect: "follow" });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
