@@ -46,7 +46,7 @@
   --cb-glass: 0.5;
   --cb-blur: 22px;
   --cb-image-blur: 6px;
-  --cb-term-opacity: 0.82;
+  --cb-term-glass: 0.6;
   --cb-position: center;
   --cb-size: cover;
 
@@ -334,31 +334,32 @@ body, #root, #__next,
 
 /* ---------------------------------------------------------------- 3. frosted glass */
 
-/* Sidebar and tall side panels: Ayu panel tint + blur. */
+/* Sidebar, tall side panels and the Claude Code panes: Ayu panel tint + blur. */
 .dframe-sidebar,
-[data-cb-glass="panel"] {
+[data-cb-glass="panel"],
+[data-cb-glass="pane"] {
   background-color: rgb(var(--cb-panel-rgb) / var(--cb-glass)) !important;
   background-image: none !important;
   -webkit-backdrop-filter: blur(var(--cb-blur)) saturate(1.15) !important;
   backdrop-filter: blur(var(--cb-blur)) saturate(1.15) !important;
 }
 
-/* Terminal (Claude Code): frost the pane behind it, and make the xterm layers
- * see-through so the picture shows through the empty cells while coloured
- * output keeps its own colours. A touch more opaque than the sidebar, for
- * readability. */
+/* Terminal (Claude Code): the pane behind it is frosted glass of its own
+ * opacity (--cb-term-glass, "Terminal" in the settings), and the terminal
+ * itself is see-through: its DOM layers are cleared, and the background colour
+ * xterm paints on its canvas is keyed out by the page script's SVG filter
+ * (#cb-term-key), so the text stays crisp over the glass. */
 [data-cb-glass="term"] {
-  background-color: rgb(var(--cb-panel-rgb) / calc(var(--cb-glass) + 0.22)) !important;
+  background-color: rgb(var(--cb-panel-rgb) / var(--cb-term-glass)) !important;
   background-image: none !important;
   -webkit-backdrop-filter: blur(var(--cb-blur)) saturate(1.1) !important;
   backdrop-filter: blur(var(--cb-blur)) saturate(1.1) !important;
 }
-/* xterm paints its background on an opaque canvas, so CSS can't clear it: make
- * the whole terminal slightly translucent instead, so the frosted pane (and the
- * picture) shows through. --cb-term-opacity 1 turns this off. */
 [data-cb-term] {
-  opacity: var(--cb-term-opacity) !important;
   background-color: transparent !important;
+}
+[data-cb-term] canvas {
+  filter: url(#cb-term-key) !important;
 }
 [data-cb-term] .xterm-viewport,
 [data-cb-term] .xterm-screen,

@@ -120,7 +120,7 @@ Tout se recharge en direct. Tes propres règles CSS vont dans
 | Flou de l'image      | `imageBlur`          | `6`            | flou de l'image en px (0 à 60) — aussi dans le panneau |
 | Verre                | `glass`              | `0.5`          | opacité du verre (barre latérale, panneaux), 0 à 1 |
 | Flou du verre        | `blur`               | `22`           | flou du verre en px (0 = sans flou) |
-| Terminal             | `terminalOpacity`    | `0.82`         | opacité du terminal, 0.3 à 1 (1 = opaque, sans l'image derrière) |
+| Terminal             | `terminalGlass`      | `0.6`          | opacité du verre derrière le terminal, 0 à 1 ; le fond du terminal lui-même est transparent |
 | Cadrage              | `position`           | `center`       | `center`, `top`, `bottom` (ou `50% 20%` à la main) |
 | Taille               | `size`               | `cover`        | `cover` (remplit) ou `contain` (image entière) |
 | Calques opaques      | `autoClear`          | `true`         | détection automatique des calques opaques |

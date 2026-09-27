@@ -277,14 +277,148 @@ function classify(el, vw, vh) {
   return null;
 }
 
-// Terminals (xterm.js). Its background is painted on an opaque canvas, so CSS
-// cannot clear it; instead we frost the pane behind it, clear the wrappers in
-// between, and make the xterm itself slightly translucent (--cb-term-opacity)
-// so the frosted picture shows through. Coloured output stays readable.
+// ---------------------------------------------------------------- Claude Code panes
+
+// The side panes of the Code view (diff, files, preview, terminal): the pane
+// frame becomes frosted glass, and the big opaque surfaces inside it (code
+// view, gutters, the diff viewer's own container) are cleared so the picture
+// shows through. Those can live in a shadow root, which the injected CSS does
+// not reach, so they get an inline style instead. Small coloured rows (added or
+// removed lines, a selection) keep their colour. The chat column's hidden
+// placeholder panel is left alone.
+const PANE = '[data-pane-root], .epitaxy-view-panel:not([aria-hidden="true"])';
+const PANE_SKIP = "iframe, webview, canvas, video, img, .xterm, [role=\"dialog\"], [role=\"menu\"], [role=\"listbox\"], [role=\"tooltip\"]";
+
+// Inline styles set inside shadow roots, to put back on dispose.
+let inlineCleared = [];
+
+// Is `el` (possibly inside shadow roots) somewhere under `ancestor`?
+function within(ancestor, el) {
+  for (let n = el; n; ) {
+    if (ancestor.contains(n)) return true;
+    const r = n.getRootNode();
+    n = r instanceof ShadowRoot ? r.host : null;
+  }
+  return false;
+}
+
+function clearInline(el) {
+  if (el.hasAttribute(CLEAR)) return;
+  const saved = { el };
+  for (const prop of ["background-color", "background-image"]) {
+    saved[prop] = [el.style.getPropertyValue(prop), el.style.getPropertyPriority(prop)];
+  }
+  inlineCleared.push(saved);
+  el.style.setProperty("background-color", "transparent", "important");
+  el.style.setProperty("background-image", "none", "important");
+  el.setAttribute(CLEAR, "");
+}
+
+function restoreInline() {
+  for (const saved of inlineCleared) {
+    for (const prop of ["background-color", "background-image"]) {
+      const [value, priority] = saved[prop];
+      if (value) saved.el.style.setProperty(prop, value, priority);
+      else saved.el.style.removeProperty(prop);
+    }
+    saved.el.removeAttribute(CLEAR);
+  }
+  inlineCleared = [];
+}
+
+function clearPane(pane) {
+  const pr = pane.getBoundingClientRect();
+  if (pr.width < 160 || pr.height < 120) return;
+  const found = new Set();
+  const visit = (scope, x, y, depth) => {
+    for (const el of scope.elementsFromPoint(x, y)) {
+      if (found.has(el)) continue;
+      found.add(el);
+      if (el.shadowRoot && depth < 4) visit(el.shadowRoot, x, y, depth + 1);
+    }
+  };
+  // Columns across the pane, plus one near each edge (gutters are narrow);
+  // rows down it, plus one just under the top edge (the pane's header).
+  const xs = [pr.left + 20, pr.right - 20];
+  for (let i = 0; i < 4; i += 1) xs.push(pr.left + ((i + 0.5) * pr.width) / 4);
+  const ys = [pr.top + 12];
+  for (let j = 0; j < 5; j += 1) ys.push(pr.top + ((j + 0.5) * pr.height) / 5);
+  for (const x of xs) for (const y of ys) visit(document, x, y, 0);
+  for (const el of found) {
+    if (!(el instanceof HTMLElement) || el === pane || !within(pane, el)) continue;
+    if (el.closest(PANE_SKIP) || el.hasAttribute(GLASS)) continue;
+    if (alphaOf(getComputedStyle(el).backgroundColor) < 0.85) continue;
+    const r = el.getBoundingClientRect();
+    const w = Math.min(r.right, pr.right) - Math.max(r.left, pr.left);
+    const h = Math.min(r.bottom, pr.bottom) - Math.max(r.top, pr.top);
+    if (w <= 0 || h <= 0) continue;
+    const surface = w * h >= 0.25 * pr.width * pr.height; // the code view, the diff container
+    const strip = w >= 16 && (h >= 0.5 * pr.height || (h >= 120 && h >= 3 * w)); // a gutter
+    const header = w >= 0.9 * pr.width && h <= 64 && r.top - pr.top <= 4; // the pane's title bar
+    if (!surface && !strip && !header) continue;
+    if (el.getRootNode() === document) el.setAttribute(CLEAR, "");
+    else clearInline(el);
+  }
+}
+
+function markPanes() {
+  for (const pane of document.querySelectorAll(PANE)) {
+    if (!(pane instanceof HTMLElement) || pane.parentElement?.closest(PANE)) continue; // outermost only
+    if (pane.closest('[aria-hidden="true"]') || pane.closest(`#${UI_ID}`)) continue;
+    const r = pane.getBoundingClientRect();
+    if (r.width < 160 || r.height < 120) continue;
+    if (!pane.hasAttribute(GLASS)) pane.setAttribute(GLASS, "pane");
+    clearPane(pane);
+  }
+}
+
+// xterm.js paints the terminal background on an opaque canvas, which no CSS can
+// clear. An SVG filter turns that colour transparent instead: alpha grows with
+// the distance in brightness from the terminal background, so the text stays
+// opaque and the frosted pane behind shows through the empty cells. Keyed on
+// the theme background xterm writes on .xterm-viewport; kept across re-runs.
+const KEY_ID = "cb-term-key";
+const DEFS_ID = "cb-defs";
+function rgbOf(color) {
+  const m = /rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/.exec(color || "");
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+function termKey(term) {
+  const bg = rgbOf(term.querySelector(".xterm-viewport")?.style.backgroundColor) || [11, 14, 20];
+  const luma = (0.2126 * bg[0] + 0.7152 * bg[1] + 0.0722 * bg[2]) / 255;
+  // Light terminal: the text is darker than the background, flip the sign.
+  const k = luma > 0.5 ? -12 : 12;
+  const alpha = [0.2126 * k, 0.7152 * k, 0.0722 * k, 0, -(k * luma) - 0.2].map((v) => v.toFixed(4)).join(" ");
+  let defs = document.getElementById(DEFS_ID);
+  if (!defs) {
+    defs = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    defs.id = DEFS_ID;
+    defs.setAttribute("width", "0");
+    defs.setAttribute("height", "0");
+    defs.setAttribute("aria-hidden", "true");
+    defs.style.position = "absolute";
+    defs.innerHTML = `<filter id="${KEY_ID}" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values=""/></filter>`;
+    document.body.appendChild(defs);
+  }
+  const values = `1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  ${alpha}`;
+  const matrix = defs.querySelector("feColorMatrix");
+  if (matrix.getAttribute("values") !== values) matrix.setAttribute("values", values);
+}
+
+// Terminals (xterm.js): frost the pane behind, clear the wrappers in between,
+// and key out the background of the canvas (termKey above).
 function markTerminals(vw, vh) {
   for (const term of document.querySelectorAll(".xterm")) {
     if (!(term instanceof HTMLElement)) continue;
     term.setAttribute(TERM, "");
+    termKey(term);
+    // Already inside a frosted Code pane: make that pane the darker terminal
+    // glass rather than stacking a second layer of glass.
+    const outer = term.closest('[data-cb-glass="pane"]');
+    if (outer) {
+      outer.setAttribute(GLASS, "term");
+      continue;
+    }
     let pane = null;
     const chain = [];
     let el = term.parentElement;
@@ -360,6 +494,7 @@ function run() {
   buildUI();
   const list = sample(vw, vh);
   if (CB.autoClear !== false) {
+    markPanes();
     markTerminals(vw, vh);
     for (const el of list) {
       const kind = classify(el, vw, vh);
@@ -604,6 +739,7 @@ function dispose({ rerun = false } = {}) {
     node.removeAttribute(GLASS);
     node.removeAttribute(TERM);
   }
+  restoreInline();
   document.getElementById(UI_ID)?.remove();
   gridEl = null;
   root.removeAttribute(MODE);
@@ -613,6 +749,7 @@ function dispose({ rerun = false } = {}) {
     if (blobUrl) window.__claudeBackdropBlob = blobUrl;
   } else {
     removePicture();
+    document.getElementById(DEFS_ID)?.remove();
     if (blobUrl) URL.revokeObjectURL(blobUrl);
   }
   if (window[NS] === api) delete window[NS];

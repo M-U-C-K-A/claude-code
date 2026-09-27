@@ -96,39 +96,39 @@ func requireMac() error {
 // writes it too (the gallery panel in Claude), so keys this version does not
 // know are kept as they are.
 type Config struct {
-	Enabled         bool    `json:"enabled"`
-	Image           string  `json:"image"`  // the fixed picture, relative to Dir ("gallery/<file>" or "background.<ext>")
-	Rotate          string  `json:"rotate"` // "conversation" = a random picture per conversation, "off" = fixed
-	Dim             float64 `json:"dim"`
-	Brightness      float64 `json:"brightness"`
-	ImageOpacity    float64 `json:"imageOpacity"`
-	ImageBlur       float64 `json:"imageBlur"`
-	Glass           float64 `json:"glass"`
-	Blur            float64 `json:"blur"`
-	TerminalOpacity float64 `json:"terminalOpacity"`
-	Position        string  `json:"position"`
-	Size            string  `json:"size"`
-	Mode            string  `json:"mode"` // "dark", "light" or "auto": exposed to the page as data-cb-mode
-	AutoClear       bool    `json:"autoClear"`
-	Refresh         int64   `json:"refresh,omitempty"` // bumped to ask the loader for a fresh report
+	Enabled       bool    `json:"enabled"`
+	Image         string  `json:"image"`  // the fixed picture, relative to Dir ("gallery/<file>" or "background.<ext>")
+	Rotate        string  `json:"rotate"` // "conversation" = a random picture per conversation, "off" = fixed
+	Dim           float64 `json:"dim"`
+	Brightness    float64 `json:"brightness"`
+	ImageOpacity  float64 `json:"imageOpacity"`
+	ImageBlur     float64 `json:"imageBlur"`
+	Glass         float64 `json:"glass"`
+	Blur          float64 `json:"blur"`
+	TerminalGlass float64 `json:"terminalGlass"` // the glass behind the terminal (its own background is keyed out)
+	Position      string  `json:"position"`
+	Size          string  `json:"size"`
+	Mode          string  `json:"mode"` // "dark", "light" or "auto": exposed to the page as data-cb-mode
+	AutoClear     bool    `json:"autoClear"`
+	Refresh       int64   `json:"refresh,omitempty"` // bumped to ask the loader for a fresh report
 }
 
 func Defaults() Config {
 	return Config{
-		Enabled:         true,
-		Image:           "background.jpg",
-		Rotate:          "conversation",
-		Dim:             0.55,
-		Brightness:      1,
-		ImageOpacity:    1,
-		ImageBlur:       6,
-		Glass:           0.5,
-		Blur:            22,
-		TerminalOpacity: 0.82,
-		Position:        "center",
-		Size:            "cover",
-		Mode:            "dark",
-		AutoClear:       true,
+		Enabled:       true,
+		Image:         "background.jpg",
+		Rotate:        "conversation",
+		Dim:           0.55,
+		Brightness:    1,
+		ImageOpacity:  1,
+		ImageBlur:     6,
+		Glass:         0.5,
+		Blur:          22,
+		TerminalGlass: 0.6,
+		Position:      "center",
+		Size:          "cover",
+		Mode:          "dark",
+		AutoClear:     true,
 	}
 }
 
@@ -148,7 +148,7 @@ func (c Config) Clean() Config {
 	c.ImageBlur = clamp(c.ImageBlur, 0, 60)
 	c.Glass = clamp(c.Glass, 0, 1)
 	c.Blur = clamp(c.Blur, 0, 80)
-	c.TerminalOpacity = clamp(c.TerminalOpacity, 0.3, 1)
+	c.TerminalGlass = clamp(c.TerminalGlass, 0, 1)
 	if c.Rotate != "off" {
 		c.Rotate = "conversation"
 	}
@@ -187,7 +187,7 @@ func (b *Backdrop) ReadConfig() Config {
 		"enabled": &cfg.Enabled, "image": &cfg.Image, "rotate": &cfg.Rotate,
 		"dim": &cfg.Dim, "brightness": &cfg.Brightness, "imageOpacity": &cfg.ImageOpacity,
 		"imageBlur": &cfg.ImageBlur, "glass": &cfg.Glass, "blur": &cfg.Blur,
-		"terminalOpacity": &cfg.TerminalOpacity, "position": &cfg.Position, "size": &cfg.Size,
+		"terminalGlass": &cfg.TerminalGlass, "position": &cfg.Position, "size": &cfg.Size,
 		"mode": &cfg.Mode, "autoClear": &cfg.AutoClear, "refresh": &cfg.Refresh,
 	}
 	for key, target := range fields {

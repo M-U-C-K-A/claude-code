@@ -89,6 +89,17 @@ func TestPicturesDoNotGoThroughACSSVariable(t *testing.T) {
 	}
 }
 
+// The terminal's background is keyed out by an SVG filter the page script
+// creates and theme.css references by id: both sides must agree.
+func TestTerminalKeyFilterIsWired(t *testing.T) {
+	if !strings.Contains(ThemeCSS, "url(#cb-term-key)") || !strings.Contains(PageScript, `KEY_ID = "cb-term-key"`) {
+		t.Fatal("theme.css and page.js disagree on the terminal key filter id")
+	}
+	if !strings.Contains(PageScript, "[data-pane-root]") {
+		t.Fatal("page.js no longer looks for the Claude Code panes")
+	}
+}
+
 func TestThemeIsWellFormed(t *testing.T) {
 	if strings.Count(ThemeCSS, "{") != strings.Count(ThemeCSS, "}") {
 		t.Fatal("unbalanced braces in theme.css")

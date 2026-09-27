@@ -160,7 +160,7 @@
       imageBlur: [6, 0, 60],
       brightness: [1, 0.3, 1.6],
       imageOpacity: [1, 0.1, 1],
-      terminalOpacity: [0.82, 0.3, 1],
+      terminalGlass: [0.6, 0, 1],
     };
     const num = (cfg, key) => clamp(cfg[key], NUM[key][0], NUM[key][1], NUM[key][2]);
 
@@ -170,7 +170,7 @@
       let css =
         `:root{--cb-dim:${num(cfg, "dim")};--cb-glass:${num(cfg, "glass")};--cb-blur:${num(cfg, "blur")}px;` +
         `--cb-image-blur:${num(cfg, "imageBlur")}px;--cb-image-opacity:${num(cfg, "imageOpacity")};` +
-        `--cb-brightness:${num(cfg, "brightness")};--cb-term-opacity:${num(cfg, "terminalOpacity")};` +
+        `--cb-brightness:${num(cfg, "brightness")};--cb-term-glass:${num(cfg, "terminalGlass")};` +
         `--cb-position:${position};--cb-size:${size}}`;
       if (num(cfg, "blur") === 0) css += "\n.dframe-sidebar,[data-cb-glass]{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}";
       return css;

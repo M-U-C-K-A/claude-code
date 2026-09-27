@@ -32,7 +32,7 @@ func TestReadConfigIsForgiving(t *testing.T) {
 	os.MkdirAll(b.Dir, 0o700)
 	os.WriteFile(b.path("config.json"), []byte(`{
 		"enabled": false, "dim": "très sombre", "blur": 999, "imageBlur": -3,
-		"brightness": 9, "terminalOpacity": 0, "mode": "sepia", "position": "50% 20%",
+		"brightness": 9, "terminalGlass": 3, "mode": "sepia", "position": "50% 20%",
 		"size": "stretch", "rotate": "on", "image": "", "somethingElse": 1
 	}`), 0o644)
 	cfg := b.ReadConfig()
@@ -41,7 +41,7 @@ func TestReadConfigIsForgiving(t *testing.T) {
 	want.Blur = 80               // clamped
 	want.ImageBlur = 0           // clamped
 	want.Brightness = 1.6        // clamped
-	want.TerminalOpacity = 0.3   // clamped
+	want.TerminalGlass = 1       // clamped
 	want.Position = "50% 20%"    // valid, kept
 	want.Rotate = "conversation" // anything but "off" rotates
 	if cfg != want {
@@ -76,7 +76,7 @@ func TestWriteConfigKeepsTheLoaderKeys(t *testing.T) {
 	}
 	// The names src/loader.js reads.
 	for _, key := range []string{"enabled", "image", "rotate", "dim", "brightness", "imageOpacity", "imageBlur",
-		"glass", "blur", "terminalOpacity", "position", "size", "mode", "autoClear"} {
+		"glass", "blur", "terminalGlass", "position", "size", "mode", "autoClear"} {
 		if _, ok := raw[key]; !ok {
 			t.Errorf("config.json lacks %q", key)
 		}
