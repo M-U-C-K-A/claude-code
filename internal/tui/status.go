@@ -112,6 +112,14 @@ func StatusReport(st *backdrop.Status) string {
 	}
 	age := time.Since(report.At).Round(time.Second)
 	add("", sTitle.Render("Dans Claude")+sMuted.Render(fmt.Sprintf("  rapport du loader il y a %s", humanAge(age))))
+	switch report.PageScript {
+	case "support":
+		add(row("script", sOK.Render("dossier de support")+sMuted.Render(" (appliqué en direct)")))
+	case "builtin":
+		add(row("script", sWarn.Render("intégré au loader")+sMuted.Render(" : relance claude-backdrop pour l'actualiser")))
+	default:
+		add(row("script", sWarn.Render("ancien loader")+sMuted.Render(" : fais « Mettre à jour » pour les correctifs en direct")))
+	}
 	blocked, opaque := false, false
 	for _, page := range report.Pages {
 		css := sOK.Render("ok")
@@ -162,6 +170,69 @@ func StatusReport(st *backdrop.Status) string {
 		add("", RenderLine(kindNote, "Calques opaques restants : rends-les transparents dans "+tildePath(filepath.Join(st.Dir, "custom.css"))))
 	}
 	return strings.Join(out, "\n")
+}
+
+// ProbeReport renders what covers each Claude page: the element stacks at a
+// few points and the large layers, as the page script measured them. This is
+// what to look at (or send) when a surface stays opaque.
+func ProbeReport(st *backdrop.Status) string {
+	if st.Report == nil {
+		return ""
+	}
+	var out []string
+	add := func(lines ...string) { out = append(out, lines...) }
+	for _, page := range st.Report.Pages {
+		if page.Page == nil || page.Page.Probe == nil {
+			continue
+		}
+		p := page.Page.Probe
+		add("", sTitle.Render("Relevé")+sMuted.Render("  "+page.URL))
+		if p.Error != "" {
+			add("  " + sErr.Render(p.Error))
+			continue
+		}
+		if len(p.Picture) > 0 {
+			var parts []string
+			for _, k := range []string{"variable", "sheet", "shown", "html", "body"} {
+				if v, ok := p.Picture[k]; ok {
+					parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+				}
+			}
+			add("  image  " + sMuted.Render(strings.Join(parts, " · ")))
+		}
+		for _, name := range []string{"centre", "gauche", "droite"} {
+			if stack, ok := p.Points[name]; ok {
+				add("  " + sBlue.Render(name))
+				for _, el := range stack {
+					add("    " + probeLine(el))
+				}
+			}
+		}
+		if len(p.Layers) > 0 {
+			add("  " + sBlue.Render("grands calques"))
+			for _, el := range p.Layers {
+				add("    " + probeLine(el))
+			}
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+func probeLine(el backdrop.ProbeEl) string {
+	parts := []string{el.El}
+	if len(el.Box) == 4 {
+		parts = append(parts, sMuted.Render(fmt.Sprintf("%d×%d@%d,%d", el.Box[2], el.Box[3], el.Box[0], el.Box[1])))
+	}
+	for _, kv := range [][2]string{{"bg", el.Bg}, {"img", el.Img}, {"::before", el.Before}, {"::after", el.After},
+		{"pe", el.PE}, {"pos", el.Pos}, {"opacity", el.Opacity}, {"role", el.Role}, {"cb", el.CB}} {
+		if kv[1] != "" {
+			parts = append(parts, sMuted.Render(kv[0]+" ")+kv[1])
+		}
+	}
+	if el.Shadow {
+		parts = append(parts, sMuted.Render("shadow"))
+	}
+	return strings.Join(parts, "  ")
 }
 
 func humanAge(d time.Duration) string {

@@ -5,8 +5,10 @@
 // ~/Library/Application Support/ClaudeBackdrop/ and reloaded live when those
 // files change (config.json, theme.css, custom.css, the picture).
 //
-// claude-backdrop (src/embed.go) inlines the version and the page script
-// (src/page.js) below.
+// claude-backdrop (src/embed.go) inlines the version and a copy of the page
+// script (src/page.js) below. The page script actually run is the one in the
+// support folder when there is one (claude-backdrop writes it there, like
+// theme.css), so its fixes apply live, without reinstalling Claude.
 // Any failure is caught and logged: the loader must never break Claude.
 ;(function claudeBackdropLoader() {
   "use strict";
@@ -271,6 +273,12 @@
       }
     }
 
+    // The page script: the support folder's copy, or the built-in one.
+    function pageScript() {
+      const text = readText(file("page.js"));
+      return text.includes("__claudeBackdrop") ? text : PAGE_SCRIPT;
+    }
+
     // Everything to inject, rebuilt only when a file changed. The chosen image
     // is left to the page script (it knows the conversation and the mode); the
     // loader just hands it the fixed image and the gallery.
@@ -283,6 +291,7 @@
         stamp(file("config.json")),
         stamp(file("theme.css")),
         stamp(file("custom.css")),
+        stamp(file("page.js")),
         picture,
         stamp(picture),
         stamp(path.join(galleryDir, "manifest.json")),
@@ -321,7 +330,7 @@
         };
         css = `${readText(file("theme.css"))}\n${stableTokens(cfg)}\n${readText(file("custom.css"))}`;
       }
-      cache = { key, enabled, css, image, page };
+      cache = { key, enabled, css, image, page, script: pageScript() };
       return cache;
     }
 
@@ -345,7 +354,7 @@
         }
         if (b.css) current.cssKey = await wc.insertCSS(b.css, { cssOrigin: "user" });
         const js = b.enabled
-          ? `(async()=>{const CB=${JSON.stringify(b.page)};\n${PAGE_SCRIPT}\n})()`
+          ? `(async()=>{const CB=${JSON.stringify(b.page)};\n${b.script}\n})()`
           : "(()=>{try{window.__claudeBackdrop&&window.__claudeBackdrop.dispose()}catch(e){}return null})()";
         current.page = await wc.executeJavaScript(js, true);
         // The page shows a preview: follow up with the full-size picture,
@@ -397,6 +406,7 @@
         }
         const status = {
           loader: VERSION,
+          pageScript: readText(file("page.js")).includes("__claudeBackdrop") ? "support" : "builtin",
           at: new Date().toISOString(),
           app: app.getVersion(),
           electron: process.versions.electron,

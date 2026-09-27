@@ -260,8 +260,9 @@ const customCSS = `/* Tes propres règles CSS pour Claude Desktop, rechargées e
  */
 `
 
-// EnsureSupport creates the support folder and brings theme.css up to date
-// (written only when it changed, so Claude does not reload for nothing).
+// EnsureSupport creates the support folder and brings theme.css and page.js up
+// to date (written only when they changed, so Claude does not reload for
+// nothing).
 func (b *Backdrop) EnsureSupport() error {
 	if err := os.MkdirAll(b.Dir, 0o700); err != nil {
 		return err
@@ -269,6 +270,13 @@ func (b *Backdrop) EnsureSupport() error {
 	theme := b.path("theme.css")
 	if current, err := os.ReadFile(theme); err != nil || string(current) != payload.ThemeCSS {
 		if err := writeAtomic(theme, []byte(payload.ThemeCSS)); err != nil {
+			return err
+		}
+	}
+	// The loader runs this copy of the page script, so page fixes apply live.
+	page := b.path("page.js")
+	if current, err := os.ReadFile(page); err != nil || string(current) != payload.PageScript {
+		if err := writeAtomic(page, []byte(payload.PageScript)); err != nil {
 			return err
 		}
 	}

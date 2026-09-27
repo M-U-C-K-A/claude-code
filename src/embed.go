@@ -31,15 +31,17 @@ var Entitlements []byte
 type Loader struct {
 	// Tag is written in the asar markers: "<version>-<hash>".
 	Tag string
-	// Hash covers loader.js and page.js: the same hash means the same loader,
-	// whatever release of claude-backdrop installed it.
+	// Hash covers loader.js: the same hash means the same loader, whatever
+	// release of claude-backdrop installed it.
 	Hash string
 	Code string
 }
 
 // BuildLoader inlines the tag and the page script into loader.js.
 func BuildLoader(version string) (Loader, error) {
-	sum := sha256.Sum256([]byte(loaderTemplate + "\x00" + PageScript))
+	// Only loader.js counts: the page script is read live from the support
+	// folder, so changing it needs no reinstall.
+	sum := sha256.Sum256([]byte(loaderTemplate))
 	hash := hex.EncodeToString(sum[:])[:10]
 	tag := version + "-" + hash
 	code := strings.Replace(loaderTemplate, "const VERSION = __CB_VERSION__;", "const VERSION = "+jsString(tag)+";", 1)

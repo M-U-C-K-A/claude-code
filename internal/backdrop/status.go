@@ -47,12 +47,13 @@ type Status struct {
 
 // Report is status.json, written by the loader from inside Claude.
 type Report struct {
-	Loader  string       `json:"loader"`
-	At      time.Time    `json:"at"`
-	App     string       `json:"app"`
-	Enabled bool         `json:"enabled"`
-	Image   string       `json:"image"`
-	Pages   []PageReport `json:"pages"`
+	Loader     string       `json:"loader"`
+	PageScript string       `json:"pageScript"` // "support" (live copy) or "builtin"
+	At         time.Time    `json:"at"`
+	App        string       `json:"app"`
+	Enabled    bool         `json:"enabled"`
+	Image      string       `json:"image"`
+	Pages      []PageReport `json:"pages"`
 }
 
 type PageReport struct {
@@ -72,7 +73,32 @@ type PageState struct {
 	Glass     int      `json:"glass"`
 	Terminals int      `json:"terminals"`
 	Errors    []string `json:"errors"` // steps of the page script that failed
+	Probe     *Probe   `json:"probe"`
 	Opaque    []Layer  `json:"opaque"`
+}
+
+// Probe is what covers the page, as the page script sees it.
+type Probe struct {
+	Points  map[string][]ProbeEl `json:"points"`
+	Layers  []ProbeEl            `json:"layers"`
+	Picture map[string]any       `json:"picture"`
+	Error   string               `json:"error"`
+}
+
+// ProbeEl describes one element of the page.
+type ProbeEl struct {
+	El      string `json:"el"`
+	Box     []int  `json:"box"`
+	Bg      string `json:"bg"`
+	Img     string `json:"img"`
+	Before  string `json:"::before"`
+	After   string `json:"::after"`
+	PE      string `json:"pe"`
+	Pos     string `json:"pos"`
+	Opacity string `json:"opacity"`
+	Role    string `json:"role"`
+	CB      string `json:"cb"`
+	Shadow  bool   `json:"shadow"`
 }
 
 // Layer is a large opaque surface the page script could not make see-through.

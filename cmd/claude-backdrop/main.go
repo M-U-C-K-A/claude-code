@@ -258,6 +258,11 @@ func status(b *backdrop.Backdrop) error {
 	fmt.Println(gold.Render("Claude Backdrop " + backdrop.Version))
 	fmt.Println()
 	fmt.Println(tui.StatusReport(&st))
+	if probe := tui.ProbeReport(&st); probe != "" {
+		fmt.Println(probe)
+		fmt.Println()
+		fmt.Println(muted.Render("Relevé complet : " + filepath.Join(b.Dir, "status.json")))
+	}
 	return nil
 }
 

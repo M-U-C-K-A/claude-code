@@ -162,19 +162,32 @@ const canLoad = (src) =>
     img.src = src;
   });
 
-// The picture goes into a stylesheet built here, not into the --cb-image
-// variable: Chromium drops a custom property over 2 MB, and a 4K picture as a
-// data: URL is bigger. The sheet outlives re-runs (settings changes re-run
-// this script), so the picture does not blink. CSSOM is not subject to the
-// page's style-src CSP; the picture itself is, hence the blob: fallback.
+// The picture is painted twice: in the --cb-image variable (up to 2 MB, beyond
+// which Chromium drops a custom property: the preview) and in a stylesheet
+// built here (any size: the full 4K picture). The sheet outlives re-runs
+// (settings changes re-run this script), so the picture does not blink. CSSOM
+// is not subject to the page's style-src CSP; the picture itself is, hence the
+// blob: fallback.
 const SHEET = "__claudeBackdropSheet";
+const VAR_MAX = 1800000; // under Chromium's 2 MB limit for a custom property
 function picture(url) {
-  let sheet = window[SHEET];
-  if (!sheet) {
-    sheet = window[SHEET] = new CSSStyleSheet();
+  // The --cb-image variable, as before: it survives anything the page does to
+  // its stylesheets, but only takes pictures under 2 MB (the preview; a
+  // full-size picture leaves the preview there).
+  if (!url) root.style.removeProperty("--cb-image");
+  else if (url.length <= VAR_MAX) root.style.setProperty("--cb-image", `url("${url}")`);
+  // The stylesheet takes any size.
+  if (!window[SHEET]) window[SHEET] = new CSSStyleSheet();
+  keepSheet();
+  window[SHEET].replaceSync(url ? `html body::before { background-image: url("${url}") !important; }` : "");
+}
+// A page that reassigns document.adoptedStyleSheets drops ours: put it back
+// (checked on every scan).
+function keepSheet() {
+  const sheet = window[SHEET];
+  if (sheet && !document.adoptedStyleSheets.includes(sheet)) {
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
   }
-  sheet.replaceSync(url ? `html body::before { background-image: url("${url}") !important; }` : "");
 }
 function removePicture() {
   const sheet = window[SHEET];
@@ -260,11 +273,26 @@ function sample(vw, vh) {
     .sort((a, b) => depth(a) - depth(b));
 }
 
+// A page-sized fill can also be painted by an element's ::before / ::after
+// (the CSS for [data-cb-clear] clears those too).
+function opaquePseudo(el) {
+  for (const which of ["::before", "::after"]) {
+    const ps = getComputedStyle(el, which);
+    if (ps.content !== "none" && alphaOf(ps.backgroundColor) >= 0.85 && (ps.position === "absolute" || ps.position === "fixed")) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function classify(el, vw, vh) {
   if (el.hasAttribute(CLEAR) || el.hasAttribute(GLASS)) return null;
   if (el.closest(KEEP) || el.closest(EDITOR)) return null;
   const style = getComputedStyle(el);
-  if (alphaOf(style.backgroundColor) < 0.85) return null;
+  if (alphaOf(style.backgroundColor) < 0.85) {
+    const r = el.getBoundingClientRect();
+    return visibleArea(r, vw, vh) >= 0.3 * vw * vh && opaquePseudo(el) ? "clear" : null;
+  }
   const r = el.getBoundingClientRect();
   const area = visibleArea(r, vw, vh);
   if (area <= 0) return null;
@@ -443,7 +471,7 @@ function markTerminals(vw, vh) {
     termKey(term);
     // Already inside a frosted Code pane: make that pane the darker terminal
     // glass rather than stacking a second layer of glass.
-    const outer = term.closest('[data-cb-glass="pane"]');
+    const outer = term.closest('[data-cb-glass="pane"], [data-cb-glass="term"]');
     if (outer) {
       outer.setAttribute(GLASS, "term");
       continue;
@@ -513,6 +541,73 @@ let timer = 0;
 let lastRun = 0;
 let opaque = [];
 
+// Page-sized elements that elementsFromPoint does not return: a backdrop with
+// pointer-events: none, or one under another layer. Walks down from <body>
+// through large elements only (small ones cannot hold a window-sized layer).
+function largeLayers(vw, vh) {
+  const out = [];
+  let visited = 0;
+  const walk = (el, level) => {
+    for (const child of el.children) {
+      if (++visited > 4000) return;
+      if (!(child instanceof HTMLElement) || child.id === UI_ID) continue;
+      const area = visibleArea(child.getBoundingClientRect(), vw, vh);
+      if (area >= 0.3 * vw * vh) out.push(child);
+      if (level < 10 && area >= 0.1 * vw * vh) walk(child, level + 1);
+    }
+  };
+  walk(document.body, 0);
+  return out;
+}
+
+// ---------------------------------------------------------------- probe
+// What covers the page, for `claude-backdrop status`: the stack of elements at
+// a few points, the large layers, and whether the picture is in place. This is
+// what tells, from a real Claude, which element to make transparent.
+function describe(el) {
+  const cs = getComputedStyle(el);
+  const cls = typeof el.className === "string" ? el.className.trim().split(/\s+/).filter(Boolean).slice(0, 4) : [];
+  const d = { el: el.tagName.toLowerCase() + (el.id ? `#${el.id}` : "") + cls.map((c) => `.${c}`).join("") };
+  const r = el.getBoundingClientRect();
+  d.box = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
+  if (alphaOf(cs.backgroundColor) > 0) d.bg = cs.backgroundColor;
+  if (cs.backgroundImage !== "none") d.img = cs.backgroundImage.slice(0, 48);
+  for (const which of ["::before", "::after"]) {
+    const ps = getComputedStyle(el, which);
+    if (ps.content !== "none" && (alphaOf(ps.backgroundColor) > 0 || ps.backgroundImage !== "none")) {
+      d[which] = `${ps.backgroundColor} ${ps.position}`;
+    }
+  }
+  if (cs.pointerEvents === "none") d.pe = "none";
+  if (cs.position !== "static") d.pos = cs.position + (cs.zIndex !== "auto" ? ` z${cs.zIndex}` : "");
+  if (cs.opacity !== "1") d.opacity = cs.opacity;
+  const role = el.getAttribute("role");
+  if (role) d.role = role;
+  const marks = [CLEAR, GLASS, TERM].filter((a) => el.hasAttribute(a)).map((a) => a.replace("data-cb-", "") + (el.getAttribute(a) ? `=${el.getAttribute(a)}` : ""));
+  if (marks.length) d.cb = marks.join(",");
+  if (el.shadowRoot) d.shadow = true;
+  return d;
+}
+
+function probe() {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const out = { points: {} };
+  for (const [name, fx, fy] of [["centre", 0.5, 0.5], ["gauche", 0.3, 0.5], ["droite", 0.82, 0.5]]) {
+    out.points[name] = document.elementsFromPoint(fx * vw, fy * vh).slice(0, 18).map(describe);
+  }
+  out.layers = largeLayers(vw, vh).slice(0, 14).map(describe);
+  const sheet = window[SHEET];
+  out.picture = {
+    variable: root.style.getPropertyValue("--cb-image").length,
+    sheet: sheet ? (document.adoptedStyleSheets.includes(sheet) ? "attached" : "dropped") : "none",
+    shown: getComputedStyle(document.body, "::before").backgroundImage.slice(0, 32),
+    html: getComputedStyle(root).backgroundColor,
+    body: getComputedStyle(document.body).backgroundColor,
+  };
+  return out;
+}
+
 // Each step runs on its own: Claude's DOM changes between releases, and one
 // step failing must not leave the rest (or the picture) undone. Failures show
 // in `claude-backdrop status`.
@@ -533,6 +628,7 @@ function run() {
   const vh = window.innerHeight;
   if (!vw || !vh || !document.body) return;
   errors = [];
+  step("picture", keepSheet);
   step("gallery button", buildUI);
   let list = [];
   step("sampling", () => {
@@ -543,7 +639,9 @@ function run() {
     step("side panels", () => markSidePanels(list, vw, vh));
     step("terminals", () => markTerminals(vw, vh));
     step("layers", () => {
-      for (const el of list) {
+      const seen = new Set(list);
+      const all = [...list, ...largeLayers(vw, vh).filter((el) => !seen.has(el))].sort((a, b) => depth(a) - depth(b));
+      for (const el of all) {
         const kind = classify(el, vw, vh);
         if (kind === "clear") el.setAttribute(CLEAR, "");
         else if (kind === "glass") el.setAttribute(GLASS, "panel");
@@ -794,10 +892,10 @@ function dispose({ rerun = false } = {}) {
   gridEl = null;
   root.removeAttribute(MODE);
   root.removeAttribute(NOIMAGE);
-  root.style.removeProperty("--cb-image");
   if (rerun) {
     if (blobUrl) window.__claudeBackdropBlob = blobUrl;
   } else {
+    root.style.removeProperty("--cb-image");
     removePicture();
     document.getElementById(DEFS_ID)?.remove();
     if (blobUrl) URL.revokeObjectURL(blobUrl);
@@ -817,6 +915,13 @@ const status = () => ({
   terminals: document.querySelectorAll(`[${TERM}]`).length,
   errors,
   opaque,
+  probe: (() => {
+    try {
+      return probe();
+    } catch (e) {
+      return { error: String((e && e.message) || e) };
+    }
+  })(),
 });
 
 const api = { version: CB.version, dispose, rescan: run, status, setFull, want: null };

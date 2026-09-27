@@ -38,9 +38,9 @@
   --ayu-red: #d95757;         /* danger */
   --ayu-purple: #d2a6ff;      /* pro / accent-2 */
 
-  /* control knobs (the loader overrides these from config.json). The picture
-   * itself is painted on body::before by the page script's own stylesheet;
-   * --cb-image is only the fallback when it has none. */
+  /* control knobs (the loader overrides these from config.json). The page
+   * script sets --cb-image to the preview and paints the full-size picture on
+   * body::before with its own stylesheet. */
   --cb-image: none;
   --cb-dim: 0.55;
   --cb-glass: 0.5;
@@ -294,7 +294,10 @@ html[data-cb-noimage] body::before {
 body, #root, #__next,
 .dframe-root, .dframe-content, .dframe-content-inner, .dframe-main, main,
 .epitaxy-root, .epitaxy-chat-panel, .epitaxy-chat-panel-body, .epitaxy-titlebar,
-[data-cb-clear] {
+.epitaxy-side-chat, .tiles-shell, .tiles-handle,
+[data-cb-clear],
+[data-cb-clear]::before,
+[data-cb-clear]::after {
   background-color: transparent !important;
   background-image: none !important;
 }
