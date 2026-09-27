@@ -137,6 +137,9 @@ func StatusReport(st *backdrop.Status) string {
 			}
 			add(line)
 			add("    " + sMuted.Render(fmt.Sprintf("%d calques transparents · %d en verre · %d terminaux", p.Cleared, p.Glass, p.Terminals)))
+			for _, e := range p.Errors {
+				add("    " + sErr.Render("erreur ") + e)
+			}
 			for i, layer := range p.Opaque {
 				if i == 6 {
 					break

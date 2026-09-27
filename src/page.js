@@ -287,7 +287,10 @@ function classify(el, vw, vh) {
 // removed lines, a selection) keep their colour. The chat column's hidden
 // placeholder panel is left alone.
 const PANE = '[data-pane-root], .epitaxy-view-panel:not([aria-hidden="true"])';
-const PANE_SKIP = "iframe, webview, canvas, video, img, .xterm, [role=\"dialog\"], [role=\"menu\"], [role=\"listbox\"], [role=\"tooltip\"]";
+const PANE_SKIP = [
+  "iframe", "webview", "canvas", "video", "img", ".xterm", '[aria-modal="true"]',
+  '[role="menu"]', '[role="listbox"]', '[role="tooltip"]', "[data-radix-popper-content-wrapper]",
+].join(",");
 
 // Inline styles set inside shadow roots, to put back on dispose.
 let inlineCleared = [];
@@ -372,6 +375,24 @@ function markPanes() {
   }
 }
 
+// A tall panel docked on the right (the chat's file and artifact viewer, the
+// Code view's tile stack): the same treatment as a Code pane. Parents come
+// first in `list`, so the outermost one is taken; one that already holds
+// frosted panes is left alone, so glass is not stacked on glass.
+function markSidePanels(list, vw, vh) {
+  for (const el of list) {
+    if (el.hasAttribute(GLASS) || el.closest(`#${UI_ID}`) || el.closest('[aria-modal="true"]')) continue;
+    const r = el.getBoundingClientRect();
+    // right edge on the window's, starting past 40 % of it (a narrow window
+    // with a wide sidebar must not turn the chat column itself into glass)
+    const docked = r.right >= vw - 48 && r.left >= 0.4 * vw && r.width >= 260 && r.width <= 0.6 * vw && r.height >= 0.7 * vh;
+    if (!docked || el.parentElement?.closest(`[${GLASS}="pane"]`)) continue;
+    if (el.querySelector(`[${GLASS}="pane"], [${GLASS}="term"]`)) continue;
+    el.setAttribute(GLASS, "pane");
+    clearPane(el);
+  }
+}
+
 // xterm.js paints the terminal background on an opaque canvas, which no CSS can
 // clear. An SVG filter turns that colour transparent instead: alpha grows with
 // the distance in brightness from the terminal background, so the text stays
@@ -391,13 +412,21 @@ function termKey(term) {
   const alpha = [0.2126 * k, 0.7152 * k, 0.0722 * k, 0, -(k * luma) - 0.2].map((v) => v.toFixed(4)).join(" ");
   let defs = document.getElementById(DEFS_ID);
   if (!defs) {
-    defs = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    // Built node by node: claude.ai enforces Trusted Types, innerHTML throws.
+    const SVG_NS = "http://www.w3.org/2000/svg";
+    defs = document.createElementNS(SVG_NS, "svg");
     defs.id = DEFS_ID;
     defs.setAttribute("width", "0");
     defs.setAttribute("height", "0");
     defs.setAttribute("aria-hidden", "true");
     defs.style.position = "absolute";
-    defs.innerHTML = `<filter id="${KEY_ID}" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values=""/></filter>`;
+    const filter = document.createElementNS(SVG_NS, "filter");
+    filter.id = KEY_ID;
+    filter.setAttribute("color-interpolation-filters", "sRGB");
+    const matrix = document.createElementNS(SVG_NS, "feColorMatrix");
+    matrix.setAttribute("type", "matrix");
+    filter.appendChild(matrix);
+    defs.appendChild(filter);
     document.body.appendChild(defs);
   }
   const values = `1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  ${alpha}`;
@@ -484,6 +513,18 @@ let timer = 0;
 let lastRun = 0;
 let opaque = [];
 
+// Each step runs on its own: Claude's DOM changes between releases, and one
+// step failing must not leave the rest (or the picture) undone. Failures show
+// in `claude-backdrop status`.
+let errors = [];
+function step(name, fn) {
+  try {
+    fn();
+  } catch (e) {
+    if (errors.length < 8) errors.push(`${name}: ${(e && e.message) || e}`);
+  }
+}
+
 function run() {
   timer = 0;
   if (disposed) return;
@@ -491,19 +532,28 @@ function run() {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   if (!vw || !vh || !document.body) return;
-  buildUI();
-  const list = sample(vw, vh);
+  errors = [];
+  step("gallery button", buildUI);
+  let list = [];
+  step("sampling", () => {
+    list = sample(vw, vh);
+  });
   if (CB.autoClear !== false) {
-    markPanes();
-    markTerminals(vw, vh);
-    for (const el of list) {
-      const kind = classify(el, vw, vh);
-      if (kind === "clear") el.setAttribute(CLEAR, "");
-      else if (kind === "glass") el.setAttribute(GLASS, "panel");
-    }
-    markComposer();
+    step("Code panes", markPanes);
+    step("side panels", () => markSidePanels(list, vw, vh));
+    step("terminals", () => markTerminals(vw, vh));
+    step("layers", () => {
+      for (const el of list) {
+        const kind = classify(el, vw, vh);
+        if (kind === "clear") el.setAttribute(CLEAR, "");
+        else if (kind === "glass") el.setAttribute(GLASS, "panel");
+      }
+    });
+    step("composer", markComposer);
   }
-  opaque = leftovers(list, vw, vh);
+  step("report", () => {
+    opaque = leftovers(list, vw, vh);
+  });
 }
 
 function schedule() {
@@ -765,6 +815,7 @@ const status = () => ({
   cleared: document.querySelectorAll(`[${CLEAR}]`).length,
   glass: document.querySelectorAll(`[${GLASS}]`).length,
   terminals: document.querySelectorAll(`[${TERM}]`).length,
+  errors,
   opaque,
 });
 

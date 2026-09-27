@@ -64,14 +64,15 @@ type PageReport struct {
 
 // PageState is what the page script reports about one Claude window.
 type PageState struct {
-	Image     string  `json:"image"`
-	Painting  string  `json:"painting"`
-	Full      bool    `json:"full"` // the full-size picture replaced the preview
-	Mode      string  `json:"mode"`
-	Cleared   int     `json:"cleared"`
-	Glass     int     `json:"glass"`
-	Terminals int     `json:"terminals"`
-	Opaque    []Layer `json:"opaque"`
+	Image     string   `json:"image"`
+	Painting  string   `json:"painting"`
+	Full      bool     `json:"full"` // the full-size picture replaced the preview
+	Mode      string   `json:"mode"`
+	Cleared   int      `json:"cleared"`
+	Glass     int      `json:"glass"`
+	Terminals int      `json:"terminals"`
+	Errors    []string `json:"errors"` // steps of the page script that failed
+	Opaque    []Layer  `json:"opaque"`
 }
 
 // Layer is a large opaque surface the page script could not make see-through.

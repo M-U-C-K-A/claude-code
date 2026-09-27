@@ -100,6 +100,19 @@ func TestTerminalKeyFilterIsWired(t *testing.T) {
 	}
 }
 
+// claude.ai enforces Trusted Types: assigning HTML strings throws, which
+// stopped the page script half-way (no picture, nothing cleared) in the
+// pages that have a terminal. Build nodes instead.
+func TestScriptsUseNoHTMLSinks(t *testing.T) {
+	for name, code := range map[string]string{"page.js": PageScript, "loader.js": loaderTemplate} {
+		for _, sink := range []string{".innerHTML", ".outerHTML", "insertAdjacentHTML", "document.write"} {
+			if strings.Contains(code, sink) {
+				t.Errorf("%s uses %s, refused by claude.ai's Trusted Types", name, sink)
+			}
+		}
+	}
+}
+
 func TestThemeIsWellFormed(t *testing.T) {
 	if strings.Count(ThemeCSS, "{") != strings.Count(ThemeCSS, "}") {
 		t.Fatal("unbalanced braces in theme.css")
